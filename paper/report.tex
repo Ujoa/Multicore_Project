@@ -1,0 +1,39 @@
+\documentclass{article}
+
+\usepackage{bibspacing}
+
+\begin{document}
+    \begin{titlepage}
+        \vspace*{\fill}
+        \begin{center}
+            \huge {Weight Free Vector in Rust} \\[0.5cm]
+            \large {Camilo Lozano, Dax Borde, Xavier Banks, Juan Parra}  \\[0.4cm]
+            \large {October 21, 2020} \\[3.0 cm]
+        \end{center}
+
+        \begin{abstract}
+            % blah blah blah
+            \normalsize
+            {
+                This report goes over the implementation of weight-free
+                vectors in Rust using a prior established paper on C++ as
+                the motivation. This will need to be modified because
+                this is just a placeholder text.
+            }
+        \end{abstract}
+
+        \vspace*{\fill}
+    \end{titlepage}
+
+    \input{pages/intro}
+    \input{pages/background}
+    \input{pages/experiment_design}
+    \input{pages/performance}
+    \input{pages/results}
+    \input{pages/conclusion}
+
+
+    \newpage
+    \bibliography{pages/references}
+    \bibliographystyle{ieeetr}
+\end{document}
