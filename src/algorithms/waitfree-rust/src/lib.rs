@@ -71,9 +71,19 @@ struct ShiftDescr {
 }
 
 // Implementations for the different Descriptors
+impl PopDescr {
+    pub fn new(vec: Rc<Vector>, pos: usize) -> PopDescr {
+        PopDescr {
+            vec,
+            pos,
+            child: None
+        }
+    }
+}
+
 impl Descriptor for PopDescr {
     fn descr_type() -> DescriptorType {
-        todo!()
+        DescriptorType::PopDescrType
     }
     fn complete(&self) -> bool {
         todo!()
@@ -83,9 +93,19 @@ impl Descriptor for PopDescr {
     }
 }
 
+
+impl PopSubDescr {
+    pub fn new(parent: Rc<PopDescr>, value: usize) -> PopSubDescr {
+        PopSubDescr {
+            parent,
+            value,
+        }
+    }
+}
+
 impl Descriptor for PopSubDescr {
     fn descr_type() -> DescriptorType {
-        todo!()
+        DescriptorType::PopSubDescrType
     }
     fn complete(&self) -> bool {
         todo!()
