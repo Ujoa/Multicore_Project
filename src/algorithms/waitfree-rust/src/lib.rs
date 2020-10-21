@@ -16,6 +16,7 @@ pub trait Vector {
 }
 
 trait Descriptor {
+    fn descr_type() -> DescriptorType;
     fn complete(&self) -> bool;
     fn value(&self) -> usize;
 }
@@ -24,7 +25,7 @@ trait Descriptor {
 struct PopDescr {
     vec: Rc<Vector>,
     pos: usize,
-    child: Arc<PopSubDescr>
+    child: Option<Arc<PopSubDescr>>
 }
 
 // PopSubDescr consists of a reference to a previously placed PopDescr (parent)
@@ -32,6 +33,12 @@ struct PopDescr {
 struct PopSubDescr {
     parent: Rc<PopDescr>,
     value: usize,
+}
+
+enum DescriptorType {
+    PushDescrType,
+    PopDescrType,
+    PopSubDescrType,
 }
 
 enum PushState {
@@ -65,6 +72,9 @@ struct ShiftDescr {
 
 // Implementations for the different Descriptors
 impl Descriptor for PopDescr {
+    fn descr_type() -> DescriptorType {
+        todo!()
+    }
     fn complete(&self) -> bool {
         todo!()
     }
@@ -74,6 +84,9 @@ impl Descriptor for PopDescr {
 }
 
 impl Descriptor for PopSubDescr {
+    fn descr_type() -> DescriptorType {
+        todo!()
+    }
     fn complete(&self) -> bool {
         todo!()
     }
@@ -83,6 +96,9 @@ impl Descriptor for PopSubDescr {
 }
 
 impl Descriptor for PushDescr {
+    fn descr_type() -> DescriptorType {
+        todo!()
+    }
     fn complete(&self) -> bool {
         todo!()
     }
@@ -92,6 +108,9 @@ impl Descriptor for PushDescr {
 }
 
 impl Descriptor for ShiftOp {
+    fn descr_type() -> DescriptorType {
+        todo!()
+    }
     fn complete(&self) -> bool {
         todo!()
     }
@@ -101,6 +120,9 @@ impl Descriptor for ShiftOp {
 }
 
 impl Descriptor for ShiftDescr {
+    fn descr_type() -> DescriptorType {
+        todo!()
+    }
     fn complete(&self) -> bool {
         todo!()
     }
