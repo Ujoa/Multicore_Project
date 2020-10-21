@@ -35,7 +35,7 @@ email address}
 \IEEEauthorblockA{\textit{Grad Student, Dept. Computer Science} \\
 \textit{University of Central Florida}\\
 Orlando, FL, USA \\
-email address}
+juan.parra54@knights.ucf.edu}
 }
 
 \maketitle
@@ -52,7 +52,7 @@ wait-free, rust, efficient, vector, concurrent
 
 \section{Introduction}
 
-Today, applications are quite complex and must perform efficiently to keep up with performance demands. It is well known that many applications implement a number of common data structures. These data structures form the foundation of the application, and their performance is closely tied to the efficiency of the application. In this project, we will focus on the vector. A sequential vector is a container that stores a sequence of elements contiguously in memory \cite{main}. This allows for efficient constant-time random access, rather than linear-time. Concurrent vectors use more complex memory models to provide the same functionality for many threads \cite{main}.
+Today, software applications are quite complex and must perform efficiently to keep up with performance demands. It is well known that many applications implement a number of common data structures. These data structures form the foundation of the application, and their performance is closely tied to the efficiency of the application. In this project, we will focus on the vector. A sequential vector is a container that stores a sequence of elements contiguously in memory \cite{main}. This allows for efficient constant-time random access, rather than linear-time. Concurrent vectors use more complex memory models to provide the same functionality for many threads \cite{main}.
 
 Rust has become a popular language for safely building multi-threaded applications, as it was built from the ground up with concurrency in mind \cite{rust}. In contrast to other languages, Rust is very strictly typed, has an excellent compiler, and has excellent memory management \cite{rust}. As a result, Rust will not let you make mistakes that can commonly occur in other languages. For example, segmentation faults are not possible in safe, compilable Rust code.
 
@@ -95,7 +95,12 @@ Given the difficulty of implementing an efficient wait-free vector for Rust, we 
     
     \subsection{Reproduce C++}
     
-    This section is giving credit to the work of c650 on github for providing a reference point in the C++ implementation. Although the entity produced results, we decided it was best to reproduce their results for maximum precision. This was done by extrapolating the code and running several individual tests on components of the wait-free vector, such as \verb|popBack| and \verb|pushBack|. This gave us a starting point to what numbers we should expect after the Rust implementation was completed. While writing the code, we were not sure if the implementation will be better or worse, but as stated before, we were contributing a new data structure to the programming language. This would be provided with performance results and it would be up to the user to determine if the newly created data structure would fit their needs.
+    This section is giving credit to the work of c650 on github for providing a reference point in the C++ implementation. Although the entity produced results, we decided it was best to reproduce their results for maximum precision. This was done by extrapolating the code and running several individual tests on components of the wait-free vector, such as \verb|popBack| and \verb|pushBack|. This gave us a starting point to what numbers we should expect after the Rust implementation was completed. While writing the code, we were not sure if the implementation will be better or worse, but as stated before, we were contributing a new data structure to the programming language. This would be provided with performance results and it would be up to the user to determine if the newly created data structure would fit their needs. For example, Figure 1 shows the reproduction of the time it took for popBack and pushBack (insert and delete respectively) operations to take place with 32 threads. 
+    
+    \begin{figure}[h]
+    \includegraphics[width=\linewidth]{waitfree_rand_cpp.PNG}
+    \caption{Results of Waitfree vector in C++}
+    \end{figure}
 
     \subsection{API Definitions}
     
