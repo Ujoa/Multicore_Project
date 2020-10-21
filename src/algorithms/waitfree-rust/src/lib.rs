@@ -1,7 +1,7 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
-trait Vector {
+pub trait Vector {
     // API Methods
     fn push_back(&self, value: usize) -> bool;
     fn pop_back(&self) -> usize;
@@ -10,7 +10,9 @@ trait Vector {
     fn erase_at(&self, index: usize, element: usize) -> bool;
     fn cwrite(&self, index: usize, element: usize) -> bool;
 
-    fn announce_op(&self, descriptor: dyn Descriptor);
+    // A private method that will be used internally, but
+    // not exposed.
+    // fn announce_op(&self, descriptor: dyn Descriptor);
 }
 
 trait Descriptor {
@@ -62,7 +64,6 @@ struct ShiftDescr {
 }
 
 // Implementations for the different Descriptors
-
 impl Descriptor for PopDescr {
     fn complete(&self) -> bool {
         todo!()
