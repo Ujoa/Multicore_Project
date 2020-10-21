@@ -115,9 +115,21 @@ impl Descriptor for PopSubDescr {
     }
 }
 
+
+impl PushDescr {
+    pub fn new(vec: Rc<Vector>, pos: usize, value: usize) -> PushDescr {
+        PushDescr {
+            vec,
+            pos,
+            value,
+            state: PushState::Undecided,
+        }
+    }
+}
+
 impl Descriptor for PushDescr {
     fn descr_type() -> DescriptorType {
-        todo!()
+        DescriptorType::PushDescrType
     }
     fn complete(&self) -> bool {
         todo!()
