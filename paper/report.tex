@@ -23,7 +23,7 @@ email address}
 \IEEEauthorblockA{\textit{Grad Student, Dept. Computer Science} \\
 \textit{University of Central Florida}\\
 Orlando, FL, USA \\
-email address}
+daxborde@knights.ucf.edu}
 \and
 \IEEEauthorblockN{Camilo Lozano}
 \IEEEauthorblockA{\textit{Grad Student, Dept. Computer Science} \\
@@ -42,7 +42,7 @@ email address}
 
 \begin{abstract}
 
-Data structures are fundamentally important in computer science. With the introduction of new and/or popular languages, the need for data structures to natively be available arises. However, Rust being a popularized language, data structures are limited. For example, vectors are instrumental to data structures and algorithms. They are used quite frequently due to their constant-time access. There does not exist non-blocking vectors in Rust and to address this limitation, we present the first non-blocking and wait-free vector.
+Rust is a new programming language that focuses on high performance, access to low level programming, and painless concurrency. With the introduction of new programming languages, the demand for commonly used data structures written natively is strong. Despite its surge in popularity over the past few years and its focus on concurrency, Rust has a surprisingly small variety of concurrent data structures available. Vectors are used quite frequently in sequential Rust, due to their resizability and constant-time access. However, There are few existing implementations of concurrent vectors in Rust. Thus, we present the first non-blocking and wait-free vector written in Rust, based on Feldman et.al. \cite{main}. The goal of this project is to provide an easy-to-use wait-free vector as a Rust library, and to compare our Rust implementation to other implementations, such as blocking implementations and the original C++ implementation.
 
 \end{abstract}
 
@@ -52,17 +52,17 @@ wait-free, rust, efficient, vector, concurrent
 
 \section{Introduction}
 
-In today's age, applications are more complex and must perform efficiently to keep up with demand. These applications are graded upon benchmarks that result from tests. From these tests, it is well known that many applications implement some sort of algorithm to which many algorithms share common traits, these traits called data structures. These data structures are the underlying foundation to which can speed up or slow down said algorithms. For example, a vector is a container that stores a sequence of elements contiguously in memory. [1]. This allows for efficient constant-time access, rather than linear-time. However, this becomes more hazy when dealing with concurrent vectors.
+Today, applications are quite complex and must perform efficiently to keep up with performance demands. It is well known that many applications implement a number of common data structures. These data structures form the foundation of the application, and their performance is closely tied to the efficiency of the application. In this project, we will focus on the vector. A sequential vector is a container that stores a sequence of elements contiguously in memory \cite{main}. This allows for efficient constant-time random access, rather than linear-time. Concurrent vectors use more complex memory models to provide the same functionality for many threads \cite{main}.
 
-Rust has become a popular language for safe multi-threaded applications as it was built from the ground up with concurrency in mind. The idea is that while writing the code it is more strictly typed than other languages it will not let you make mistakes that can commonly occur in other such languages. For example segmentation faults are hard to come by once you have some working code. 
-Another benefit that Rust brings to the table is its memory management; all variables must be declared with a ‘lifetime’ which can either be implied by it’s scope or explicitly in the header of a function. In turn this allows for your code to have efficiently managed memory without really having to worry about how it gets done. In fact one of the draws of both the paper and the C++ implementation is that they do not go into detail or explain how memory is managed. One of the benchmarks of the C++ code can take up to 10 gigabytes since it is not taking care of freeing memory, presumably because of how complicated it can be to implement. If done properly our implementation will have this feature natively from the Rust implementation.
-The challenge comes in a couple of parts: Rust’s strictly typed restrictions, lack of similar data structures in Rust, and the group’s unfamiliarity with the language.
-Part of the reason Rust can be so thread safe is that it requires code to be much strictly typed. For example a basic data structure can’t be simply shared between threads. There is a concept of ‘ownership’ where once a data structure gets passed to another it can no longer be used outside of that scope. You can’t just create a vector and pass it to as many threads as you want. You must use a thread safe data structure that can wrap around it like an Arc that will allow you to ‘clone’ the structure. What this means for this project is that even though the goal is to port a 1:1 replica of the data structure in Rust, there just might not be an equivalent function or way of doing it.
-This is not just a challenge in understating the wait free vector data structure but also implementing it in a language that the group is not familiar with. For all of us it is a first time in learning both the concepts and the complexities of the language. Rust can be unforgiving when it comes to how things can be done and implemented and it is a big obstacle figuring out how to work around those issues.
+Rust has become a popular language for safely building multi-threaded applications, as it was built from the ground up with concurrency in mind \cite{rust}. In contrast to other languages, Rust is very strictly typed, has an excellent compiler, and has excellent memory management \cite{rust}. As a result, Rust will not let you make mistakes that can commonly occur in other languages. For example, segmentation faults are not possible in safe, compilable Rust code.
+
+Another benefit that Rust brings to the table is its memory management; all variables must be declared with a ‘lifetime’ which can either be implied by it’s scope or explicitly in the header of a function. In turn this allows for your code to have efficiently managed memory without really having to worry about how it gets done. In fact one of the drawbacks of both the paper and the C++ implementation is that they do not explain how memory is managed. One of the benchmarks of the C++ code can take up to 10 gigabytes since it is not taking care of freeing memory, presumably because of how complicated it can be to implement. By contrast, our implementation aims to leverage Rust's lifetime and borrowing features to implement a concurrent memory management scheme with significantly less complexity.
+
+
 
 \subsection{Problem Statement}
 
-The goal for this project is to establish a benchmark for a wait free vector data structure in C++ and Rust. Specifically we’ll be looking at the paper An Efficient Wait-Free Vector (Feldman 2016). Currently there exists a C++ implementation of the data structure that we’ll be using as our control. As far as we know there is no similar implementation that is publicly available for any type of wait free vector in Rust. With this project we seek to be able to implement the key features of the data structure into a new language. Once we have an equivalent implementation in Rust we will run tests on the two different implementations to see if there is any performance gain between the two implementations. We will be looking at speed, memory efficiency, and other attributes.
+\textbf{The goal for this project is to implement a wait free vector data structure in Rust, and benchmark it an existing C++ implementation.} Specifically we’ll be looking at the paper An Efficient Wait-Free Vector \cite{main}. We will be using the existing C++ implementation of the data structure as our control \cite{cpp}. As far as we know, there is no existing non-blocking vector written in Rust that is available publicly. With this project we seek to be able to implement the key features of the commonly used data structure into a new language. Once we have an equivalent implementation in Rust we will run tests on the two different implementations to see if there is any performance difference between them. We will be looking mainly at speed and memory usage.
 
 \section{Motivation}
 
@@ -74,9 +74,12 @@ While it is a good thing as our implementation is more unique this is a challeng
 
 \section{Related Work}
 
-Our Rust implementation of a wait-free vector will be primary based on the wait-free vector described by Feldman et. al. in [main]. An open source C++ implementation of the vector described in Feldman et. al. [main] is available at [charles]. We will use this implementation to evaluate the performance of our Rust implementation.
-Feldman et. al. [main] state that theirs is the only wait-free vector in literature at time of publication. The authors [main] also mention that the only other non-blocking vector is [lfvec], which provides a lock free guarantee, but not a wait free one. Since then, one paper [mrlock] has expanded upon the wait-free vector presented in [main]. However, Deligero et. al. [mrlock] do not attempt to maintain the non-blocking properties of the original vector, and instead use it sequentially in combination with a novel lock. While we will use this paper [mrlock] for reference and additional insights throughout this project, it is not directly useful for solving our proposed problem. Thus, the Feldman et. al. [main] vector remains the only wait-free vector in literature. 
-This paper [main] additionally mentions Intel’s TBB library [tbb], which provides a concurrent vector. However, the documentation does not specify that this vector is non-blocking [tbb], and community discussions heavily indicate that all of the library’s collections are blocking [tbbcom]. Furthermore, Feldman et. al. [main] indicate that their vector and the lock free vector from Dechev et. al. [lfvec] are the only two non-blocking vectors in existence; the absence of TBB’s vector in this assertion, despite the detailed discussion of TBB in the paper [main], is conspicuous. Nonetheless, we plan to evaluate our Rust implementation by comparing its performance to the TBB vector, along with other blocking vector implementations. 
+Our Rust implementation of a wait-free vector will be primary based on the wait-free vector described by Feldman et. al. in \cite{main}. An open source C++ implementation of the vector described in Feldman et. al. \cite{main} is available at \cite{cpp}. We will use this implementation to evaluate the performance of our Rust implementation.
+Feldman et. al. \cite{main} state that theirs is the only wait-free vector in literature at time of publication. The authors \cite{main} also mention that the only other non-blocking vector is \cite{lfvec}, which provides a lock free guarantee, but not a wait free one. Since then, one paper \cite{mrlock} has expanded upon the wait-free vector presented in \cite{main}. However, Deligero et. al. \cite{mrlock} do not attempt to maintain the non-blocking properties of the original vector, and instead use it sequentially in combination with a novel lock. While we will use this paper for reference and additional insights throughout this project, it is not directly useful for solving our proposed problem. 
+
+Thus, the Feldman et. al. \cite{main} vector remains the only wait-free vector in literature.
+
+\cite{main} additionally mentions Intel’s TBB library \cite{tbb}, which provides a concurrent vector. However, the documentation does not specify that this vector is non-blocking, and community discussions heavily indicate that all of the library’s collections are blocking \cite{tbbcomm}. Furthermore, Feldman et. al. \cite{main} indicate that their vector and the lock free vector from Dechev et. al. \cite{lfvec} are the only two non-blocking vectors in existence; the absence of TBB’s vector in this assertion, despite the detailed discussion of TBB in the paper \cite{main}, is conspicuous. Nonetheless, we plan to evaluate our Rust implementation by comparing its performance to the TBB vector, along with other blocking vector implementations. 
 
 \section{Approach}
 
@@ -92,7 +95,7 @@ Given the difficulty of implementing an efficient wait-free vector for Rust, we 
     
     \subsection{Reproduce C++}
     
-    This section is giving credit to the work of c650 on github for providing a reference point in the C++ implementation. Although the entity produced results, we decided it was best to reproduce their results for maximum precision. This was done by extrapolating the code and running several individual tests on components of the wait-free vector, such as popBack and pushBack. This gave us a starting point to what numbers we should expect after the Rust implementation was completed. While writing the code, we were not sure if the implementation will be better or worse, but as stated before, we were contributing a new data structure to the programming language. This would be provided with performance results and it would be up to the user to determine if the newly created data structure would fit their needs.
+    This section is giving credit to the work of c650 on github for providing a reference point in the C++ implementation. Although the entity produced results, we decided it was best to reproduce their results for maximum precision. This was done by extrapolating the code and running several individual tests on components of the wait-free vector, such as \verb|popBack| and \verb|pushBack|. This gave us a starting point to what numbers we should expect after the Rust implementation was completed. While writing the code, we were not sure if the implementation will be better or worse, but as stated before, we were contributing a new data structure to the programming language. This would be provided with performance results and it would be up to the user to determine if the newly created data structure would fit their needs.
 
     \subsection{API Definitions}
     
@@ -103,18 +106,37 @@ Given the difficulty of implementing an efficient wait-free vector for Rust, we 
     All code was compiled and tested in Linux environments (Ubuntu let's just say). This provided a standard across the board to avoid running into OS specific bugs or delays in compilation. 
 
 \section{Implementation}
+\subsection{Anticipated Challenges}
+We anticipate a few challenges with implementing this project: Rust’s strictly typed restrictions, lack of similar data structures in Rust, and the group’s unfamiliarity with the language.
 
-In this section, we go in detail in how the wait-free vector will be implemented and discuss the changes that were necessary to make. We will provide a summary and informal reasoning of correctness for each of the following operations:
+Rust's promise of safe and easy concurrency directly influenced the creation of its strict compiler and type system. Though these features will help us greatly in the long run, we anticipate a few sticking points at the beginning of the project. An example of this strictness is that a basic data structure can’t be simply passed between threads. Rust's concept of ‘ownership’ restricts how a data structure can be passed to it, and once the passing occurs, the data still can't be used outside of the original scope. Simply creating a vector and passing it to as many threads as you want without is not possible. You must wrap the vector in a Mutex and an Arc (atomic reference counter), which will allow you to ‘clone’ the structure. If Arc is used, the structure can then be successfully borrowed, as the compiler detects that Arc can clean up the memory once it leaves the scope of all child threads. 
 
+% Moved from challenges section at the end to here
+This is just one example of the increased program complexity required to satisfy the compiler's stringent requirements for memory management. Running into more instances like this is one of our main concerns for this project. Granted, these restrictions are meant to keep programmers safe from segmentation faults and other issues, but they can make implementations of algorithms more complicated. If a part of the wait-free vector algorithm can’t be done in normal Rust, it is possible to override some of its safety features by using a variant called unsafe Rust. Doing so would be a sort of last resort option, once you expose unsafe Rust to your code, you lose many of the guarantees that make Rust special. It allows you to access more lower level controls to the code like you would have in C++, but it is no longer safe.
+
+%Since there are almost no other known implementations of this data structure in Rust, it also needs to be seen if it even is possible
+
+We are expecting to run into many more cases like this throughout the project. Even though the goal is to create a wait-free vector that functions identically to the original implementation, its possible that roadblock may force us to adapt the implementation as we go.
+
+
+
+Since our group is using this project as an opportunity to improve our Rust skills, we anticipate running into a few roadblocks along the way. For all of us it is a first time in learning both the concepts of the language, and how it functions differently than others that we know. Rust can be unforgiving, and we may run into big obstacles figuring out how to work around those issues.
+
+
+
+\subsection{Plan for Implementation}
+To summarize from the above sections, our goal is to implement the wait-free vector from Feldman et. al. \cite{main} in the Rust programming language. In addition to wait-freedom, our implementation will also guarantee linearizability. With this implementation completed, we plan to compare it with a handful of other concurrent vector implementations in both C++ and Rust. We are primarily interested in how our Rust implementation compares to the other implementations with regards to performance, but we are also interested to see if any major changes to the design are necessary.
+The goal is to expose the wait-free vector for use in general concurrent programming. Our goal is to allow users to import our crate and use our wait-free vector in their concurrent algorithms without using Rust’s “unsafe” blocks. While our own implementation will most likely require low level pointer manipulation, and thus the use of “unsafe” blocks, we want to avoid exposing this complexity.
+Our plan is to support each of the methods that Feldman et. al. support in their original implementation. We first began by creating the structs and traits for the vector itself and the descriptors for each operation. The following are the operations that will be supported followed by a summary and informal reasoning of correctness:
     \begin{itemize}
-        \item pushBack
-        \item popBack
-        \item valueAt
-        \item insertAt
-        \item eraseAt
+        \item \verb|pushBack|
+        \item \verb|popBack|
+        \item \verb|at|
+        \item \verb|insertAt|
+        \item \verb|eraseAt|
     \end{itemize}
     
-Due to Rust not using descriptors (as described in the C++ implementation), we took a different approach. 
+After \verb|pushBack|, \verb|popBack|, and “at” are completed, we can begin the benchmarking process. We will run a large number of each operation in fixed proportions (e.g. 50\% \verb|pushBack|, 30\% \verb|popBack|, and 20\% \verb|at|) and record the average number of operations per second. We run the same performance test on the C++ wait-free vector \cite{cpp, main}, the Intel TBB concurrent vector \cite{tbb}, and a naive coarse grained lock on Rust’s sequential vector. We will compare both the execution time and memory consumption of each algorithm. The memory consumption comparison may be somewhat difficult, as the open source C++ implementation does not implement a memory recycling scheme, and leaks a great deal of memory, but we will do our best to present a worthwhile comparison.
 
 \section{Rust Data Structure}
 
@@ -129,49 +151,13 @@ Due to Rust not using descriptors (as described in the C++ implementation), we t
     \subsection{Limitations}
 
 \subsection{Figures and Tables}
-\paragraph{Positioning Figures and Tables} Place figures and tables at the top and 
-bottom of columns. Avoid placing them in the middle of columns. Large 
-figures and tables may span across both columns. Figure captions should be 
-below the figures; table heads should appear above the tables. Insert 
-figures and tables after they are cited in the text. Use the abbreviation 
-``Fig.~\ref{fig}'', even at the beginning of a sentence.
 
-\begin{table}[htbp]
-\caption{Table Type Styles}
-\begin{center}
-\begin{tabular}{|c|c|c|c|}
-\hline
-\textbf{Table}&\multicolumn{3}{|c|}{\textbf{Table Column Head}} \\
-\cline{2-4} 
-\textbf{Head} & \textbf{\textit{Table column subhead}}& \textbf{\textit{Subhead}}& \textbf{\textit{Subhead}} \\
-\hline
-copy& More table copy$^{\mathrm{a}}$& &  \\
-\hline
-\multicolumn{4}{l}{$^{\mathrm{a}}$Sample of a Table footnote.}
-\end{tabular}
-\label{tab1}
-\end{center}
-\end{table}
+%\section{Challenges}
+% Moved a paragraph that was here up to the challenges subsection in the Implementation section above
 
-\begin{figure}[htbp]
-\centerline{\includegraphics{fig1.png}}
-\caption{Example of a figure caption.}
-\label{fig}
-\end{figure}
 
-\section{Challenges}
+\bibliographystyle{ieeetr}
+\bibliography{references}
 
-Some of our main concerns with this is how Rust implements certain restrictions on what you can do with your objects. Granted it is meant to keep you safe from segmentation faults and other issues but it can make implementations of algorithms more complicated. Now there is a possibility that if something can’t be done in normal Rust it is possible to override some of its safety features by using a variant called unsafe Rust. Doing so would be a sort of last resort option, once you expose unsafe Rust to your code, you lose many of the guarantees that make Rust special. It allows you to access more lower level controls to the code like you would have in C++ but then you would have to provide certain guarantees to it as it is no longer safe. 
-Since there are almost no other known implementations of this data structure in Rust, it also needs to be seen if it even is possible
-
-\begin{thebibliography}{00}
-
-% 1. ISO/IEC 14882 Standard for Programming Language C++,
-% Programming languages: C++. American National Standards
-% Institute, September 2011.
-
-\bibitem{b1} G. Eason, B. Noble, and I. N. Sneddon, ``On certain integrals of Lipschitz-Hankel type involving products of Bessel functions,'' Phil. Trans. Roy. Soc. London, vol. A247, pp. 529--551, April 1955.
-\bibitem{b2} J. Clerk Maxwell, A Treatise on Electricity and Magnetism, 3rd ed., vol. 2. Oxford: Clarendon, 1892, pp.68--73.
-\end{thebibliography}
 
 \end{document}
