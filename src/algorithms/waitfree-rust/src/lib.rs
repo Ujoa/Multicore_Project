@@ -8,7 +8,7 @@ pub trait Vector {
     fn pop_back(&self) -> usize;
     fn at(&self, index: usize) -> usize;
     fn insert_at(&self, index: usize, element: usize) -> bool;
-    fn erase_at(&self, index: usize, element: usize) -> bool;
+    fn erase_at(&self, index: usize) -> bool;
     fn cwrite(&self, index: usize, element: usize) -> bool;
 
     // A private method that will be used internally, but
@@ -27,7 +27,7 @@ impl Vector for WaitFreeVector {
     fn pop_back(&self) -> usize { todo!() }
     fn at(&self, _: usize) -> usize { todo!() }
     fn insert_at(&self, _: usize, _: usize) -> bool { todo!() }
-    fn erase_at(&self, _: usize, _: usize) -> bool { todo!() }
+    fn erase_at(&self, _: usize) -> bool { todo!() }
     fn cwrite(&self, _: usize, _: usize) -> bool { todo!() }
     //fn announce_op(&self, _: (dyn Descriptor + 'static)) { todo!() }
 }

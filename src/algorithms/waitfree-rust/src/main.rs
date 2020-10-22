@@ -2,7 +2,8 @@ mod lib;
 use lib::Vector;
 use std::sync::Arc;
 use std::thread;
-
+use rand::Rng;
+use std::time::{Instant, Duration};
 
 
 fn test_pushback(num_threads: i32){
@@ -113,7 +114,7 @@ fn test_cwrite(num_threads: i32){
         t.join();
     }
 
-    let tot: Vec<usize> = Vec::with_capacity(LEN);
+    let mut tot: Vec<usize> = Vec::with_capacity(LEN);
 
     for i in 0..num_threads {
         for j in 0..LEN {
@@ -130,9 +131,6 @@ fn test_cwrite(num_threads: i32){
 
     println!();
 
-
-
-
 }
 
 
@@ -143,11 +141,132 @@ fn test_all(max_num_threads: usize){
     let erase = 1;
     let limit = 25;
 
+    for num_threads in 1..max_num_threads {
+
+        println!("{}",num_threads);
+
+        for t in vec![insert, erase]{
+            let v = Arc::new(lib::WaitFreeVector {});
+
+            let each_thread = max_ops/num_threads;
+            let extra = max_ops % num_threads;
+            let ops_per_thread = Arc::new(lib::WaitFreeVector {});
+
+            for i in 1..num_threads {
+                ops_per_thread.insert_at(i, each_thread);
+                if i <= extra{
+                    ops_per_thread.insert_at(i, ops_per_thread.at(i)+1);
+                }
+            }
+
+            let start_time = Instant::now();
+            for i in 0..10 {
+                v.push_back(i);
+            }
+
+            let mut threads = Vec::new();
+
+            for i in 1..num_threads{
+                let thread_ops_per_thread = ops_per_thread.clone();
+                let thread_v = v.clone();
+
+                if t == insert {
+                    threads.push(
+                        thread::spawn(
+                        move || {
+                            let mut rng = rand::thread_rng();
+                            let mut r = || -> usize {
+                                rng.gen_range(0, i)
+                            };
+
+                            let tot_ops = thread_ops_per_thread.at(i);
+                            for j in 0..tot_ops {
+                                let cur_op = r() % 3;
+                                let do_pushack = (r()%100+100)%100 < limit;
+
+                                let x = r();
+                                let size = thread_v.length();
+                                if do_pushack {
+                                    thread_v.push_back(x);
+                                } else {
+                                    if cur_op == 0 && size > 0 {
+                                        thread_v.insert_at(r() % size, x);
+                                    } else if cur_op == 1 && size > 0 {
+                                        thread_v.at(r() % size);
+                                    } else if cur_op == 2 && size > 0 {
+                                        let pos = r() % size();
+                                        let old = thread_v.at(pos);
+                                        thread_v.cwrite(pos, old);
+                                    }
+                                }
+                            }
+                        }
+                    )
+                    );
+                }
+                else if t == erase {
+                    threads.push(
+                        thread::spawn(
+                            move || {
+                                let mut rng = rand::thread_rng();
+                                let mut r = || -> usize {
+                                    rng.gen_range(0, i)
+                                };
+                                let tot_ops = thread_ops_per_thread.at(i);
+                                for j in 0..tot_ops {
+                                    let cur_op = r() % 3;
+                                    let do_pushback = (r()%100+100)%100 < limit;
+
+                                    let x = r();
+                                    let size = thread_v.length();
+
+                                    if do_pushback {
+                                        thread_v.push_back(x);
+                                    } else {
+                                        if cur_op == 0 && size > 0 {
+                                            thread_v.erase_at(r()%size);
+                                        } else if cur_op == 1 && size > 0 {
+                                            thread_v.at(r()%size);
+                                        } else if cur_op == 2 && size > 0 {
+                                            let pos = r () % size;
+                                            let old = thread_v.at(pos);
+                                            thread_v.cwrite(pos, old);
+                                        }
+                                    }
+
+
+
+                                }
+
+
+                            }
+                        )
+
+                    );
+                }
+            }
+
+            for t in threads {
+                t.join();
+            }
+
+            let end_time = Instant::now();
+            let elapsed_time = end_time.duration_since(start_time);
+
+            println!(", {:?}", elapsed_time);
+        }
+        println!("");
+    }
+
+
+
 }
 
 fn main(){
-    let v = lib::WaitFreeVector {};
-    v.push_back(100);
-    v.pop_back();
+    let num: i32 = 10;
+    test_all(num as usize);
+    test_cwrite(num);
+    test_pushback(num);
+    test_popback(num);
 
 }
