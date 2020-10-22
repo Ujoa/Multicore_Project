@@ -1,18 +1,35 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
+
 pub trait Vector {
     // API Methods
     fn push_back(&self, value: usize) -> bool;
     fn pop_back(&self) -> usize;
     fn at(&self, index: usize) -> usize;
     fn insert_at(&self, index: usize, element: usize) -> bool;
-    fn erase_at(&self, index: usize, element: usize) -> bool;
+    fn erase_at(&self, index: usize) -> bool;
     fn cwrite(&self, index: usize, element: usize) -> bool;
 
     // A private method that will be used internally, but
     // not exposed.
     // fn announce_op(&self, descriptor: dyn Descriptor);
+}
+pub struct WaitFreeVector {}
+
+impl WaitFreeVector {
+    pub fn length(&self) -> usize{todo!()}
+}
+
+impl Vector for WaitFreeVector {
+    
+    fn push_back(&self, _: usize) -> bool { todo!() }
+    fn pop_back(&self) -> usize { todo!() }
+    fn at(&self, _: usize) -> usize { todo!() }
+    fn insert_at(&self, _: usize, _: usize) -> bool { todo!() }
+    fn erase_at(&self, _: usize) -> bool { todo!() }
+    fn cwrite(&self, _: usize, _: usize) -> bool { todo!() }
+    //fn announce_op(&self, _: (dyn Descriptor + 'static)) { todo!() }
 }
 
 trait Descriptor {
