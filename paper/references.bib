@@ -1,0 +1,61 @@
+@article{main,
+
+title = {An Efficient Wait-Free Vector},
+author = {Feldman, Steven and Valera-Leon, Carlos and Dechev, Damian},
+abstractNote = {The vector is a fundamental data structure, which provides constant-time access to a dynamically-resizable range of elements. Currently, there exist no wait-free vectors. The only non-blocking version supports only a subset of the sequential vector API and exhibits significant synchronization overhead caused by supporting opposing operations. Since many applications operate in phases of execution, wherein each phase only a subset of operations are used, this overhead is unnecessary for the majority of the application. To address the limitations of the non-blocking version, we present a new design that is wait-free, supports more of the operations provided by the sequential vector, and provides alternative implementations of key operations. These alternatives allow the developer to balance the performance and functionality of the vector as requirements change throughout execution. Compared to the known non-blocking version and the concurrent vector found in Intel’s TBB library, our design outperforms or provides comparable performance in the majority of tested scenarios. Over all tested scenarios, the presented design performs an average of 4.97 times more operations per second than the non-blocking vector and 1.54 more than the TBB vector. In a scenario designed to simulate the filling of a vector, performance improvement increases to 13.38 and 1.16 times. This work presents the first ABA-free non-blocking vector. Finally, unlike the other non-blocking approach, all operations are wait-free and bounds-checked and elements are stored contiguously in memory.},
+doi = {10.1109/TPDS.2015.2417887},
+journal = {IEEE Transactions on Parallel and Distributed Systems},
+issn = {1045-9219},
+number = 3,
+volume = 27,
+place = {United States},
+year = {2016},
+month = {3}
+} 
+
+@article{mrlock,
+author = {Deligero, Timothy and Orlovic, Viktor and Dailidonis, Cody},
+year = {2019},
+month = {10},
+pages = {},
+title = {Re-implementation Of An Efficient Wait-Free Vector}
+}
+
+@InProceedings{lfvec,
+author="Dechev, Damian
+and Pirkelbauer, Peter
+and Stroustrup, Bjarne",
+editor="Shvartsman, Mariam Momenzadeh Alexander A.",
+title="Lock-Free Dynamically Resizable Arrays",
+booktitle="Principles of Distributed Systems",
+year="2006",
+publisher="Springer Berlin Heidelberg",
+address="Berlin, Heidelberg",
+pages="142--156",
+isbn="978-3-540-49991-6"
+}
+
+@misc{rust,
+    author    = "Klabnik, Steve and Nichols, Carol",
+    title     = "The Rust Programming Language",
+    note       = "https://doc.rust-lang.org/book/",
+}
+
+@misc{cpp,
+    author    = "c650",
+    title     = "waitfree-vector",
+    note       = "https://github.com/c650/waitfree-vector",
+}
+
+@misc{tbb,
+    author = "",
+    title     = "Intel Threading Building Blocks",
+    note       = "https://software.intel.com/content/ www/us/en/develop/tools/threading-building-blocks.html",
+}
+
+@misc{tbbcomm,
+    author = "softarts and Dmitry\_Vyukov",
+    title = "Intel Forum: why concurrent\_queue not use Lock-Free Queue?",
+    note = "https://community.intel.com/t5/Intel-oneAPI-Threading-Building/why-concurrent-queue-not-use-Lock-Free-Queue/td-p/910492",
+}
+

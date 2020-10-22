@@ -17,7 +17,7 @@
 \IEEEauthorblockA{\textit{Grad Student, Dept. Computer Science} \\
 \textit{University of Central Florida}\\
 Orlando, FL, USA \\
-email address}
+xavier95@knights.ucf.edu}
 \and
 \IEEEauthorblockN{Dax Borde}
 \IEEEauthorblockA{\textit{Grad Student, Dept. Computer Science} \\
@@ -29,7 +29,7 @@ daxborde@knights.ucf.edu}
 \IEEEauthorblockA{\textit{Grad Student, Dept. Computer Science} \\
 \textit{University of Central Florida}\\
 Orlando, FL, USA \\
-email address}
+clozano@knights.ucf.edu}
 \and
 \IEEEauthorblockN{Juan Parra}
 \IEEEauthorblockA{\textit{Grad Student, Dept. Computer Science} \\
@@ -79,38 +79,30 @@ Feldman et. al. \cite{main} state that theirs is the only wait-free vector in li
 
 Thus, the Feldman et. al. \cite{main} vector remains the only wait-free vector in literature.
 
-\cite{main} additionally mentions Intel’s TBB library \cite{tbb}, which provides a concurrent vector. However, the documentation does not specify that this vector is non-blocking, and community discussions heavily indicate that all of the library’s collections are blocking \cite{tbbcomm}. Furthermore, Feldman et. al. \cite{main} indicate that their vector and the lock free vector from Dechev et. al. \cite{lfvec} are the only two non-blocking vectors in existence; the absence of TBB’s vector in this assertion, despite the detailed discussion of TBB in the paper \cite{main}, is conspicuous. Nonetheless, we plan to evaluate our Rust implementation by comparing its performance to the TBB vector, along with other blocking vector implementations. 
+\cite{main} additionally mentions Intel’s TBB library \cite{tbb}, which provides a concurrent vector. However, the documentation does not specify that this vector is non-blocking, and community discussions heavily indicate that all of the library’s collections are blocking \cite{tbbcomm}. Furthermore, Feldman et. al. \cite{main} indicate that their vector and the lock free vector from Dechev et. al. \cite{lfvec} are the only two non-blocking vectors in existence; the absence of TBB’s vector in this assertion, despite the detailed discussion of TBB in the paper \cite{main}, is conspicuous. Thus, the TBB concurrent vector is most likely a blocking vector, and would not be as useful as the wait-free in applications where progress guarantees are necessary. Nonetheless, we plan to evaluate our Rust implementation by comparing its performance to the TBB vector, along with other blocking vector implementations. 
 
-\section{Approach}
 
-Given the difficulty of implementing an efficient wait-free vector for Rust, we divided the tasks up to accomplish this goal. The following is the breakdown:
-
-    \begin{itemize}
-        \item Reproduce the C++ results for a wait-free vector
-        \item Determine API definitions for Rust Implementation
-        \item Develop a testing environment to extract benchmark performances
-        \item Create informal reasoning of corrections regarding the approach
-        \item Compare benchmarks between the two languages
-    \end{itemize}
-    
-    \subsection{Reproduce C++}
-    
-    This section is giving credit to the work of c650 on github for providing a reference point in the C++ implementation. Although the entity produced results, we decided it was best to reproduce their results for maximum precision. This was done by extrapolating the code and running several individual tests on components of the wait-free vector, such as \verb|popBack| and \verb|pushBack|. This gave us a starting point to what numbers we should expect after the Rust implementation was completed. While writing the code, we were not sure if the implementation will be better or worse, but as stated before, we were contributing a new data structure to the programming language. This would be provided with performance results and it would be up to the user to determine if the newly created data structure would fit their needs. For example, Figure 1 shows the reproduction of the time it took for popBack and pushBack (insert and delete respectively) operations to take place with 32 threads. 
-    
-    \begin{figure}[h]
-    \includegraphics[width=\linewidth]{waitfree_rand_cpp.PNG}
-    \caption{Results of Waitfree vector in C++}
-    \end{figure}
-
-    \subsection{API Definitions}
-    
-    very broad summary since section {implementation} will talk more about it
-    
-    \subsection{Testing Environment}
-    
-    All code was compiled and tested in Linux environments (Ubuntu let's just say). This provided a standard across the board to avoid running into OS specific bugs or delays in compilation. 
 
 \section{Implementation}
+The following is the breakdown of the tasks required to complete our implementation:
+
+\begin{itemize}
+
+    \item Write the general API for Rust implementation of the vector and its subcomponents
+    \item Write the functionality of each method in Rust
+    \item Develop a testing environment to extract benchmark performances
+    \item Create informal reasoning of corrections regarding the approach
+    
+    
+    \item Reproduce the C++ results for a wait-free vector
+    \item Compare benchmarks between the two languages
+    \begin{itemize}
+        \item Measure performance and memory usage
+        \item Test a wide variety of scenarios by running tests with different proportions of each method
+    \end{itemize}
+    
+\end{itemize}
+
 \subsection{Anticipated Challenges}
 We anticipate a few challenges with implementing this project: Rust’s strictly typed restrictions, lack of similar data structures in Rust, and the group’s unfamiliarity with the language.
 
@@ -139,19 +131,44 @@ Our plan is to support each of the methods that Feldman et. al. support in their
         \item \verb|at|
         \item \verb|insertAt|
         \item \verb|eraseAt|
+        \item \verb|cwrite|
     \end{itemize}
     
 After \verb|pushBack|, \verb|popBack|, and “at” are completed, we can begin the benchmarking process. We will run a large number of each operation in fixed proportions (e.g. 50\% \verb|pushBack|, 30\% \verb|popBack|, and 20\% \verb|at|) and record the average number of operations per second. We run the same performance test on the C++ wait-free vector \cite{cpp, main}, the Intel TBB concurrent vector \cite{tbb}, and a naive coarse grained lock on Rust’s sequential vector. We will compare both the execution time and memory consumption of each algorithm. The memory consumption comparison may be somewhat difficult, as the open source C++ implementation does not implement a memory recycling scheme, and leaks a great deal of memory, but we will do our best to present a worthwhile comparison.
 
-\section{Rust Data Structure}
+% changed from Approach
+\section{Testing}
 
-    \subsection{Runtime/Space Analysis}
+% Given the difficulty of implementing an efficient wait-free vector for Rust, we divided the tasks up to accomplish this goal. 
+
+
+\subsection{Reproduce C++}
+
+This section is giving credit to the work of c650 on github for providing a reference point in the C++ implementation \cite{cpp}. Although the entity produced results, we decided it was best to reproduce their results for maximum precision. This was done by extrapolating the code and running several individual tests on components of the wait-free vector, such as \verb|popBack| and \verb|pushBack|. This gave us a starting point to what numbers we should expect after the Rust implementation was completed. While writing the code, we were not sure if the implementation will be better or worse, but as stated before, we were contributing a new data structure to the programming language. This would be provided with performance results and it would be up to the user to determine if the newly created data structure would fit their needs. For example, Figure 1 shows the reproduction of the time it took for popBack and pushBack (insert and delete respectively) operations to take place with 32 threads. 
     
-    \subsection{Performance}
+\begin{figure}[h]
+\includegraphics[width=\linewidth]{waitfree_rand_cpp.PNG}
+\caption{Results of Waitfree vector in C++}
+\end{figure}
+
+% \subsection{API Definitions}
+
+% very broad summary since section {implementation} will talk more about it
+
+\subsection{Testing Environment}
+
+All code was written, compiled, and tested using the standard rust build tools in a Linux environment. This provided a standard across the board to avoid running into OS specific bugs or delays in compilation. 
+
+
+% \section{Rust Data Structure}
+
+%     \subsection{Runtime/Space Analysis}
+    
+%     \subsection{Performance}
 
 \section{Evaluation}
 
-    \subsection{Rust versus C++}
+    \subsection{Performance Benchmark Results}
     
     \subsection{Limitations}
 
