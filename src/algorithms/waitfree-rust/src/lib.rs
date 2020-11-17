@@ -1,6 +1,5 @@
 use std::rc::Rc;
 use std::sync::Arc;
-use std::sync::atomic::AtomicU8;
 use crossbeam_epoch::{self as epoch, Atomic, Guard, Shared, Owned};
 use std::sync::atomic::Ordering::SeqCst;
 
@@ -53,10 +52,16 @@ const StatePassed: u8 = 0x02;
 
 
 
-trait Descriptor {
+trait DescriptorTrait {
     fn descr_type() -> DescriptorType;
     fn complete(&self, guard: &Guard) -> bool;
     fn value(&self) -> usize;
+}
+
+#[derive(Clone)]
+enum BaseDescr {
+    PushDescrType(PushDescr),
+    PopDescrType(PopDescr),
 }
 
 // contains the value to be pushed and a state member
@@ -95,7 +100,7 @@ impl PushDescr {
     // }
 }
 
-impl Descriptor for PushDescr {
+impl DescriptorTrait for PushDescr {
     fn descr_type() -> DescriptorType {
         DescriptorType::PushDescrType
     }
@@ -130,6 +135,10 @@ impl WaitFreeVector {
         let spot = contig.get_spot(position);
 
         spot
+    }
+
+    pub fn pack_descr(descr: Descriptor) {
+
     }
 
     pub fn complete_push(&self, spot: Atomic<usize>, shrd: Shared<usize>, descr: &PushDescr, guard: &Guard) {
@@ -204,10 +213,11 @@ impl Contiguous {
 
 
 // PopDescr consists solely of a reference to a PopSubDescr (child) which is initially Null.
+#[derive(Clone)]
 struct PopDescr {
-    vec: Rc<Vector>,
+    vec: Atomic<WaitFreeVector>,
     pos: usize,
-    child: Option<Arc<PopSubDescr>>
+    child: Atomic<PopSubDescr>
 }
 
 // PopSubDescr consists of a reference to a previously placed PopDescr (parent)
@@ -217,11 +227,12 @@ struct PopSubDescr {
     value: usize,
 }
 
-enum DescriptorType {
-    PushDescrType,
-    PopDescrType,
-    PopSubDescrType,
-}
+// #[derive(Clone)]
+// enum DescriptorType {
+//     PushDescrType,
+//     PopDescrType,
+//     PopSubDescrType,
+// }
 
 
 
@@ -253,7 +264,7 @@ impl PopDescr {
     }
 }
 
-impl Descriptor for PopDescr {
+impl DescriptorTrait for PopDescr {
     fn descr_type() -> DescriptorType {
         DescriptorType::PopDescrType
     }
@@ -275,7 +286,7 @@ impl PopSubDescr {
     }
 }
 
-impl Descriptor for PopSubDescr {
+impl DescriptorTrait for PopSubDescr {
     fn descr_type() -> DescriptorType {
         DescriptorType::PopSubDescrType
     }
@@ -288,7 +299,7 @@ impl Descriptor for PopSubDescr {
 }
 
 
-impl Descriptor for ShiftOp {
+impl DescriptorTrait for ShiftOp {
     fn descr_type() -> DescriptorType {
         todo!()
     }
@@ -300,7 +311,7 @@ impl Descriptor for ShiftOp {
     }
 }
 
-impl Descriptor for ShiftDescr {
+impl DescriptorTrait for ShiftDescr {
     fn descr_type() -> DescriptorType {
         todo!()
     }
