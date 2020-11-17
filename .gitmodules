@@ -1,3 +1,6 @@
 [submodule "waitfree-vector"]
 	path = waitfree-vector
 	url = https://github.com/c650/waitfree-vector
+[submodule "AtomicMarkablePtr"]
+	path = AtomicMarkablePtr
+	url = git@github.com:jamescarterbell/AtomicMarkablePtr.git

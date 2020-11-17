@@ -1,5 +1,10 @@
 use std::rc::Rc;
 use std::sync::Arc;
+use crossbeam_epoch::{self as epoch, Atomic};
+use std::sync::atomic::Ordering::SeqCst;
+
+const NotValue: usize = 0b00;
+const NotCopied: usize = 0b01;
 
 
 pub trait Vector {
@@ -23,13 +28,56 @@ impl WaitFreeVector {
 
 impl Vector for WaitFreeVector {
     
-    fn push_back(&self, _: usize) -> bool { todo!() }
+    fn push_back(&self, value: usize) -> bool {
+        todo!()
+    }
     fn pop_back(&self) -> usize { todo!() }
     fn at(&self, _: usize) -> usize { todo!() }
     fn insert_at(&self, _: usize, _: usize) -> bool { todo!() }
     fn erase_at(&self, _: usize) -> bool { todo!() }
     fn cwrite(&self, _: usize, _: usize) -> bool { todo!() }
     //fn announce_op(&self, _: (dyn Descriptor + 'static)) { todo!() }
+}
+
+struct Contiguous {
+    vector: Atomic<WaitFreeVector>,
+    old: Atomic<Contiguous>,
+    capacity: usize,
+    // array is a regular array of atomic pointers
+    array: Vec<Atomic<usize>>,
+}
+
+impl Contiguous {
+    pub fn new(vector: Atomic<WaitFreeVector>, capacity: usize) -> Contiguous {
+        let arr = vec![Atomic::<usize>::null(); capacity];
+
+        // Will use later for NotCopied
+        // for i in 0..capacity {
+        //     arr[i] = 
+        // }
+
+        Contiguous {
+            vector,
+            old: Atomic::null(),
+            capacity,
+            array: arr,
+        }
+    }
+
+    // pub fn new(vector: Box<WaitFreeVector>, old: Box<Contiguous>, capacity: usize) -> Contiguous {
+        
+    //     let arr = vec![]
+    //     Contiguous {
+    //         vector,
+    //         old,
+    //         capacity,
+
+    //     }
+    // }
+
+    pub fn get_spot(&self, position: usize) -> Atomic<usize> {
+        self.array[position].clone()
+    }
 }
 
 trait Descriptor {
@@ -58,19 +106,9 @@ enum DescriptorType {
     PopSubDescrType,
 }
 
-enum PushState {
-    Undecided,
-    Failed,
-    Passed,
-}
 
-// contains the value to be pushed and a state member
-struct PushDescr {
-    vec: Rc<Vector>,
-    value: usize,
-    pos: usize,
-    state: PushState
-}
+
+
 
 struct ShiftOp {
     vec: Rc<Vector>,
@@ -132,9 +170,27 @@ impl Descriptor for PopSubDescr {
     }
 }
 
+enum PushState {
+    Undecided,
+    Failed,
+    Passed,
+}
+
+// replace pushstate
+const StateUndecided: u8 = 0x00;
+const StateFailed: u8 = 0x01;
+const StatePassed: u8 = 0x02;
+
+// contains the value to be pushed and a state member
+struct PushDescr {
+    vec: Atomic<WaitFreeVector>,
+    value: usize,
+    pos: usize,
+    state: PushState
+}
 
 impl PushDescr {
-    pub fn new(vec: Rc<Vector>, pos: usize, value: usize) -> PushDescr {
+    pub fn new(vec: Atomic<WaitFreeVector>, pos: usize, value: usize) -> PushDescr {
         PushDescr {
             vec,
             pos,
@@ -149,7 +205,9 @@ impl Descriptor for PushDescr {
         DescriptorType::PushDescrType
     }
     fn complete(&self) -> bool {
-        todo!()
+        if self.pos == 0 {
+
+        }
     }
     fn value(&self) -> usize {
         todo!()

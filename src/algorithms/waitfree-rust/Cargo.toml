@@ -8,3 +8,4 @@ edition = "2018"
 
 [dependencies]
 rand = "0.7"
+crossbeam-epoch = "0.9.0"
