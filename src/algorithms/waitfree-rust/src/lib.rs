@@ -53,7 +53,7 @@ const StatePassed: u8 = 0x02;
 
 
 trait DescriptorTrait {
-    fn descr_type() -> DescriptorType;
+    // fn descr_type() -> DescriptorType;
     fn complete(&self, guard: &Guard) -> bool;
     fn value(&self) -> usize;
 }
@@ -101,19 +101,19 @@ impl PushDescr {
 }
 
 impl DescriptorTrait for PushDescr {
-    fn descr_type() -> DescriptorType {
-        DescriptorType::PushDescrType
-    }
+    // fn descr_type() -> DescriptorType {
+    //     DescriptorType::PushDescrType
+    // }
     fn complete(&self, guard: &Guard) -> bool {
-        let vectorptr = self.vec.load(SeqCst, guard);
-        let vector = unsafe { vectorptr.deref() };
-        let spot = vector.get_spot(self.pos, guard);
+        // let vectorptr = self.vec.load(SeqCst, guard);
+        // let vector = unsafe { vectorptr.deref() };
+        // let spot = vector.get_spot(self.pos, guard);
 
-        if self.pos == 0 {
-            self.statecas(StateUndecided, StatePassed);
+        // if self.pos == 0 {
+        //     self.statecas(StateUndecided, StatePassed);
 
-            spot.compare_and_set(vector.pack_descr(&self), self.value);
-        }
+        //     spot.compare_and_set(vector.pack_descr(&self), self.value);
+        // }
 
         
 
@@ -137,22 +137,27 @@ impl WaitFreeVector {
         spot
     }
 
-    pub fn pack_descr(descr: Descriptor) {
-
+    pub fn pack_descr(descr: BaseDescr, guard: &Guard) -> Shared<usize> {
+        let ptr = Owned::new(descr).with_tag(TagDescr).into_shared(guard);
+        let masked: Shared<usize> = unsafe { std::mem::transmute(ptr) };
+        masked
     }
 
     pub fn complete_push(&self, spot: Atomic<usize>, shrd: Shared<usize>, descr: &PushDescr, guard: &Guard) {
         let newdescr = descr.clone();
         let mystate = newdescr.state.load(SeqCst, guard);
         let rawstate = unsafe { mystate.deref() }.clone();
+        
 
         if descr.pos == 0 {
             if rawstate == StateUndecided {
                 descr.statecas(mystate, Owned::new(StatePassed), guard)
             }
+
+            let basedescr = BaseDescr::PushDescrType(newdescr);
             
-            let newptr = Owned::new(descr).with_tag(TagDescr).into_shared(guard);
-            spot.compare_and_set();
+            let newptr = Owned::new(basedescr).with_tag(TagDescr).into_shared(guard);
+            spot.compare_and_set(basedescr);
         }
     }
 }
