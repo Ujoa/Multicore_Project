@@ -52,8 +52,6 @@ const STATE_UNDECIDED: u8 = 0x00;
 const STATE_FAILED: u8 = 0x01;
 const STATE_PASSED: u8 = 0x02;
 
-
-
 trait DescriptorTrait {
     // fn descr_type() -> DescriptorType;
     fn complete(&self, guard: &Guard) -> bool;
@@ -86,9 +84,9 @@ impl PushDescr {
         }
     }
 
-    pub fn statecas(&self, expected: Shared<u8>, new: Owned<u8>, guard: &Guard) {
-        self.state.compare_and_set(expected, new, SeqCst, guard);
-    }
+    // pub fn statecas(&self, expected: Shared<u8>, new: Owned<u8>, guard: &Guard) {
+    //     self.state.compare_and_set(expected, new, SeqCst, guard);
+    // }
 
     // pub fn stateload(&self, guard: &Guard) -> (Shared<u8>, &Guard) {
     //     (self.state.load(SeqCst, guard), guard)
@@ -129,6 +127,33 @@ impl DescriptorTrait for PushDescr {
     
 }
 
+pub fn pack_descr(descr: BaseDescr, guard: &Guard) -> Shared<usize> {
+    let ptr = Owned::new(descr).with_tag(TagDescr).into_shared(guard);
+    let masked: Shared<usize> = unsafe { std::mem::transmute(ptr) };
+    masked
+}
+
+pub fn unpack_descr<'g>(curr: Shared<usize>, guard: &'g Guard) -> Option<Shared<'g, BaseDescr>> {
+    let unmasked: Shared<BaseDescr> = unsafe { std::mem::transmute(curr) };
+    
+    if unmasked.tag() == TagDescr {
+        Some(unmasked)
+    }
+    else {
+        None
+    }
+}
+
+pub fn loadstate<'g>(newdescr: &PushDescr, guard: &'g Guard) -> (Shared<'g, u8>, u8) {
+    let mystate = newdescr.state.load(SeqCst, guard);
+    if mystate.is_null() {
+        panic!("STATE OF A DESCRIPTOR WAS NULL")
+    }
+    let rawstate: u8 = unsafe { mystate.deref() }.clone();
+
+    (mystate, rawstate)
+}
+
 impl WaitFreeVector {
     pub fn length(&self) -> usize{todo!()}
     pub fn get_spot(&self, position: usize, guard: &Guard) -> Atomic<usize> {
@@ -138,31 +163,36 @@ impl WaitFreeVector {
 
         spot
     }
-
-    pub fn pack_descr(descr: BaseDescr, guard: &Guard) -> Shared<usize> {
-        let ptr = Owned::new(descr).with_tag(TagDescr).into_shared(guard);
-        let masked: Shared<usize> = unsafe { std::mem::transmute(ptr) };
-        masked
+    
+    pub fn complete_base(&self, spot: Atomic<usize>, old: Shared<usize>, descr: BaseDescr, guard: &Guard) {
+        match descr {
+            BaseDescr::PushDescrType(d) => { self.complete_push(spot, old, d, guard); },
+            _ => (),
+        }
     }
 
-    pub fn complete_push(&self, spot: Atomic<usize>, shrd: Shared<usize>, descr: &PushDescr, guard: &Guard) -> bool {
-        let newdescr: PushDescr = descr.clone();
-        let mystate: Shared<u8> = newdescr.state.load(SeqCst, guard);
-        if mystate.is_null() {
-            panic!("STATE OF A DESCRIPTOR WAS NULL IN complete_push")
-        }
+    pub fn complete_push(&self, spot: Atomic<usize>, old: Shared<usize>, descr: PushDescr, guard: &Guard) -> bool {
+        // use WaitFreeVector;
 
-        let mut rawstate: u8 = unsafe { mystate.deref() }.clone();
+        let newdescr: PushDescr = descr.clone();
+        // let mystate: Shared<u8> = newdescr.state.load(SeqCst, guard);
+        // if mystate.is_null() {
+        //     panic!("STATE OF A DESCRIPTOR WAS NULL IN complete_push")
+        // }
+
+        // let rawstate: u8 = unsafe { mystate.deref() }.clone();
+
+        let (mut mystate, mut rawstate) = loadstate(&newdescr, guard);
         
         if newdescr.pos == 0 {
             if rawstate == STATE_UNDECIDED {
-                descr.statecas(mystate, Owned::new(STATE_PASSED), guard)
+                descr.state.compare_and_set(mystate, Owned::new(STATE_PASSED), SeqCst, guard);
             }
 
             let basedescr = BaseDescr::PushDescrType(newdescr);
-            let maskdescr = WaitFreeVector::pack_descr(basedescr, guard);
+            let maskdescr = pack_descr(basedescr, guard);
             
-            spot.compare_and_set(shrd, maskdescr, SeqCst, guard);
+            spot.compare_and_set(old, maskdescr, SeqCst, guard);
 
             return true;
         }
@@ -170,18 +200,73 @@ impl WaitFreeVector {
         let spot2: Atomic<usize> = self.get_spot(newdescr.pos - 1, guard);
         let current: Shared<usize> = spot2.load(SeqCst, guard);
 
-        let failures: usize = 0;
+        let mut failures: usize = 0;
 
         while rawstate == STATE_UNDECIDED {
+            let temp = loadstate(&newdescr, guard);
+            mystate = temp.0;
+            rawstate = temp.1;
 
-            let mystate = newdescr.state.load(SeqCst, guard);
-            if mystate.is_null() {
-                panic!("STATE OF A DESCRIPTOR WAS NULL IN complete_push")
+            let spot2: Atomic<usize> = self.get_spot(newdescr.pos - 1, guard);
+            let current: Shared<usize> = spot2.load(SeqCst, guard);
+            let unpackres = unpack_descr(current, guard);
+            match unpackres {
+                None => break,
+                _ => (),
             }
-            rawstate = unsafe { mystate.deref() }.clone();
+            let baseptr = unpackres.unwrap();
+            let basedescr = unsafe { baseptr.deref() }.clone();
+
+            failures += 1;
+            if failures >= LIMIT {
+                descr.state.compare_and_set(mystate, Owned::new(STATE_PASSED), SeqCst, guard);
+            }
+
+            self.complete_base(spot2, current, basedescr, guard);
+            
+            // Reset for next loop
+            // let mystate = newdescr.state.load(SeqCst, guard);
+            // if mystate.is_null() {
+            //     panic!("STATE OF A DESCRIPTOR WAS NULL IN complete_push")
+            // }
+            // let rawstate: u8 = unsafe { mystate.deref() }.clone();
+
+            
+
+            // let spot2: Atomic<usize> = self.get_spot(newdescr.pos - 1, guard);
+            // let current: Shared<usize> = spot2.load(SeqCst, guard);
         }
 
-        true
+        let temp = loadstate(&newdescr, guard);
+        mystate = temp.0;
+        rawstate = temp.1;
+
+        // Descriptor moved out of the way, but we still have to finish this push
+        if rawstate == STATE_UNDECIDED {
+            if current.tag() == TagNotValue {
+                descr.state.compare_and_set(mystate, Owned::new(STATE_FAILED), SeqCst, guard);
+            }
+            else {
+                descr.state.compare_and_set(mystate, Owned::new(STATE_PASSED), SeqCst, guard);
+            }
+        }
+
+        let temp = loadstate(&newdescr, guard);
+        mystate = temp.0;
+        rawstate = temp.1;
+
+        if rawstate == STATE_PASSED {
+            spot.compare_and_set(old, Owned::new(newdescr.value), SeqCst, guard);
+        }
+        else {
+            spot.compare_and_set(old, Owned::new(0).with_tag(TagNotValue), SeqCst, guard);
+        }
+
+        let temp = loadstate(&newdescr, guard);
+        mystate = temp.0;
+        rawstate = temp.1;
+
+        return rawstate == STATE_PASSED;
     }
 }
 
