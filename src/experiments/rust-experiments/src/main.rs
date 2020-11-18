@@ -23,6 +23,25 @@ const TagDescr: usize = 2;
 const TagResize: usize = 3;
 
 fn main() {
+
+    loop {
+        let unpackres: Option<usize> = None;
+
+        match unpackres {
+            None => break,
+            _ => (),
+        }
+        let base = unpackres.unwrap();
+
+        println!("stuck in loop");
+
+        break;
+    }
+
+    println!("exited loop");
+}
+
+fn bitstealing() {
     println!("{}", (1 << std::mem::align_of::<usize>().trailing_zeros()));
 
     let guard = &epoch::pin();
@@ -49,28 +68,4 @@ fn main() {
     let sh2 = atm.load(SeqCst, guard);
     println!("fin-{:?}", sh2.as_raw());
     println!("tag-{:?}", sh2.tag());
-
-
-
-    // for i in 0..10 {
-    //     let test = Atomic::new(1234);
-    //     let test1 = Atomic::<usize>::null();
-        
-        
-    //     let test3 = test2[0].load(SeqCst, guard);
-    //     let b = test.load(SeqCst, guard);
-    //     let a = test3.as_raw();
-
-    //     for j in test2 {
-    //         let curr = test.load(SeqCst, guard);
-    //         println!("{:?}", curr.as_raw());
-    //     }
-    
-        
-    // }
-    
-    
-    // let p = a.load(SeqCst, guard);
-    
-    // test2[0}
 }
