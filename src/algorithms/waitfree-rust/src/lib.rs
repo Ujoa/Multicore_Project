@@ -20,6 +20,8 @@ const TagNotCopied: usize = 1;
 const TagDescr: usize = 2;
 const TagResize: usize = 3;
 
+const LIMIT: usize = 1000;
+
 
 pub trait Vector {
     // API Methods
@@ -143,22 +145,43 @@ impl WaitFreeVector {
         masked
     }
 
-    pub fn complete_push(&self, spot: Atomic<usize>, shrd: Shared<usize>, descr: &PushDescr, guard: &Guard) {
-        let newdescr = descr.clone();
-        let mystate = newdescr.state.load(SeqCst, guard);
-        let rawstate = unsafe { mystate.deref() }.clone();
-        
+    pub fn complete_push(&self, spot: Atomic<usize>, shrd: Shared<usize>, descr: &PushDescr, guard: &Guard) -> bool {
+        let newdescr: PushDescr = descr.clone();
+        let mystate: Shared<u8> = newdescr.state.load(SeqCst, guard);
+        if mystate.is_null() {
+            panic!("STATE OF A DESCRIPTOR WAS NULL IN complete_push")
+        }
 
-        if descr.pos == 0 {
+        let mut rawstate: u8 = unsafe { mystate.deref() }.clone();
+        
+        if newdescr.pos == 0 {
             if rawstate == StateUndecided {
                 descr.statecas(mystate, Owned::new(StatePassed), guard)
             }
 
             let basedescr = BaseDescr::PushDescrType(newdescr);
+            let maskdescr = WaitFreeVector::pack_descr(basedescr, guard);
             
-            let newptr = Owned::new(basedescr).with_tag(TagDescr).into_shared(guard);
-            spot.compare_and_set(basedescr);
+            spot.compare_and_set(shrd, maskdescr, SeqCst, guard);
+
+            return true;
         }
+
+        let spot2: Atomic<usize> = self.get_spot(newdescr.pos - 1, guard);
+        let current: Shared<usize> = spot2.load(SeqCst, guard);
+
+        let failures: usize = 0;
+
+        while rawstate == StateUndecided {
+
+            let mystate = newdescr.state.load(SeqCst, guard);
+            if mystate.is_null() {
+                panic!("STATE OF A DESCRIPTOR WAS NULL IN complete_push")
+            }
+            rawstate = unsafe { mystate.deref() }.clone();
+        }
+
+        true
     }
 }
 
