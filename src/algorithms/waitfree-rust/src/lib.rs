@@ -48,9 +48,9 @@ enum PushState {
 }
 
 // replace pushstate enum
-const StateUndecided: u8 = 0x00;
-const StateFailed: u8 = 0x01;
-const StatePassed: u8 = 0x02;
+const STATE_UNDECIDED: u8 = 0x00;
+const STATE_FAILED: u8 = 0x01;
+const STATE_PASSED: u8 = 0x02;
 
 
 
@@ -61,14 +61,14 @@ trait DescriptorTrait {
 }
 
 #[derive(Clone)]
-enum BaseDescr {
+pub enum BaseDescr {
     PushDescrType(PushDescr),
     PopDescrType(PopDescr),
 }
 
 // contains the value to be pushed and a state member
 #[derive(Clone)]
-struct PushDescr {
+pub struct PushDescr {
     // vec: Atomic<WaitFreeVector>,
     value: usize,
     pos: usize,
@@ -82,7 +82,7 @@ impl PushDescr {
             // vec,
             pos,
             value,
-            state: Atomic::new(StateUndecided),
+            state: Atomic::new(STATE_UNDECIDED),
         }
     }
 
@@ -155,8 +155,8 @@ impl WaitFreeVector {
         let mut rawstate: u8 = unsafe { mystate.deref() }.clone();
         
         if newdescr.pos == 0 {
-            if rawstate == StateUndecided {
-                descr.statecas(mystate, Owned::new(StatePassed), guard)
+            if rawstate == STATE_UNDECIDED {
+                descr.statecas(mystate, Owned::new(STATE_PASSED), guard)
             }
 
             let basedescr = BaseDescr::PushDescrType(newdescr);
@@ -172,7 +172,7 @@ impl WaitFreeVector {
 
         let failures: usize = 0;
 
-        while rawstate == StateUndecided {
+        while rawstate == STATE_UNDECIDED {
 
             let mystate = newdescr.state.load(SeqCst, guard);
             if mystate.is_null() {
@@ -242,7 +242,7 @@ impl Contiguous {
 
 // PopDescr consists solely of a reference to a PopSubDescr (child) which is initially Null.
 #[derive(Clone)]
-struct PopDescr {
+pub struct PopDescr {
     vec: Atomic<WaitFreeVector>,
     pos: usize,
     child: Atomic<PopSubDescr>
@@ -282,71 +282,71 @@ struct ShiftDescr {
 }
 
 // Implementations for the different Descriptors
-impl PopDescr {
-    pub fn new(vec: Rc<Vector>, pos: usize) -> PopDescr {
-        PopDescr {
-            vec,
-            pos,
-            child: None
-        }
-    }
-}
+// impl PopDescr {
+//     pub fn new(vec: Rc<Vector>, pos: usize) -> PopDescr {
+//         PopDescr {
+//             vec,
+//             pos,
+//             child: None
+//         }
+//     }
+// }
 
-impl DescriptorTrait for PopDescr {
-    fn descr_type() -> DescriptorType {
-        DescriptorType::PopDescrType
-    }
-    fn complete(&self, guard: &Guard) -> bool {
-        todo!()
-    }
-    fn value(&self) -> usize {
-        todo!()
-    }
-}
-
-
-impl PopSubDescr {
-    pub fn new(parent: Rc<PopDescr>, value: usize) -> PopSubDescr {
-        PopSubDescr {
-            parent,
-            value,
-        }
-    }
-}
-
-impl DescriptorTrait for PopSubDescr {
-    fn descr_type() -> DescriptorType {
-        DescriptorType::PopSubDescrType
-    }
-    fn complete(&self, guard: &Guard) -> bool {
-        todo!()
-    }
-    fn value(&self) -> usize {
-        todo!()
-    }
-}
+// impl DescriptorTrait for PopDescr {
+//     fn descr_type() -> DescriptorType {
+//         DescriptorType::PopDescrType
+//     }
+//     fn complete(&self, guard: &Guard) -> bool {
+//         todo!()
+//     }
+//     fn value(&self) -> usize {
+//         todo!()
+//     }
+// }
 
 
-impl DescriptorTrait for ShiftOp {
-    fn descr_type() -> DescriptorType {
-        todo!()
-    }
-    fn complete(&self, guard: &Guard) -> bool {
-        todo!()
-    }
-    fn value(&self) -> usize {
-        todo!()
-    }
-}
+// impl PopSubDescr {
+//     pub fn new(parent: Rc<PopDescr>, value: usize) -> PopSubDescr {
+//         PopSubDescr {
+//             parent,
+//             value,
+//         }
+//     }
+// }
 
-impl DescriptorTrait for ShiftDescr {
-    fn descr_type() -> DescriptorType {
-        todo!()
-    }
-    fn complete(&self, guard: &Guard) -> bool {
-        todo!()
-    }
-    fn value(&self) -> usize {
-        todo!()
-    }
-}
+// impl DescriptorTrait for PopSubDescr {
+//     fn descr_type() -> DescriptorType {
+//         DescriptorType::PopSubDescrType
+//     }
+//     fn complete(&self, guard: &Guard) -> bool {
+//         todo!()
+//     }
+//     fn value(&self) -> usize {
+//         todo!()
+//     }
+// }
+
+
+// impl DescriptorTrait for ShiftOp {
+//     fn descr_type() -> DescriptorType {
+//         todo!()
+//     }
+//     fn complete(&self, guard: &Guard) -> bool {
+//         todo!()
+//     }
+//     fn value(&self) -> usize {
+//         todo!()
+//     }
+// }
+
+// impl DescriptorTrait for ShiftDescr {
+//     fn descr_type() -> DescriptorType {
+//         todo!()
+//     }
+//     fn complete(&self, guard: &Guard) -> bool {
+//         todo!()
+//     }
+//     fn value(&self) -> usize {
+//         todo!()
+//     }
+// }
