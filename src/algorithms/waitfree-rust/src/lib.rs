@@ -2,6 +2,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use crossbeam_epoch::{self as epoch, Atomic, Guard, Shared, Owned};
 use std::sync::atomic::Ordering::SeqCst;
+use std::sync::atomic::AtomicUsize;
 
 
 // IsDescriptor when non-nul | 0b01
@@ -36,9 +37,7 @@ pub trait Vector {
     // not exposed.
     // fn announce_op(&self, descriptor: dyn Descriptor);
 }
-pub struct WaitFreeVector {
-    storage: Atomic<Contiguous>
-}
+
 
 
 enum PushState {
@@ -154,12 +153,17 @@ pub fn loadstate<'g>(newdescr: &PushDescr, guard: &'g Guard) -> (Shared<'g, u8>,
     (mystate, rawstate)
 }
 
+pub struct WaitFreeVector {
+    storage: Atomic<Contiguous>,
+    size: Atomic<AtomicUsize>,
+}
+
 impl WaitFreeVector {
     pub fn length(&self) -> usize{todo!()}
     pub fn get_spot(&self, position: usize, guard: &Guard) -> Atomic<usize> {
         let contigptr = self.storage.load(SeqCst, guard);
         let contig = unsafe { contigptr.deref() };
-        let spot = contig.get_spot(position);
+        let spot = contig.get_spot(position, guard);
 
         spot
     }
@@ -169,6 +173,54 @@ impl WaitFreeVector {
             BaseDescr::PushDescrType(d) => { self.complete_push(spot, old, d, guard); },
             _ => (),
         }
+    }
+
+    pub fn push_back(&self, tid: usize, value: Owned<usize>) -> usize {
+        let guard = &epoch::pin();
+        
+        // TODO: announcement table
+
+        let shvalue = value.into_shared(guard);
+
+        if shvalue.is_null() {
+            panic!("CANNOT PUSH NULL POINTER");
+        }
+        
+        // Should be safe, user should never pass us a descriptor
+        let realvalue = unsafe { shvalue.deref() }.clone();
+
+        let shsize = self.size.load(SeqCst, guard);
+        let sizeusizeptr = unsafe { shsize.deref() }.clone();
+        let mut pos = sizeusizeptr.load(SeqCst);
+
+        for failures in 0..=LIMIT {
+            let spot = self.get_spot(pos, guard);
+            let expectedptr = spot.load(SeqCst, guard);
+            if expectedptr.tag() == TagNotValue {
+                if pos == 0 {
+                    let res = spot.compare_and_set(expectedptr, shvalue, SeqCst, guard);
+                    match res {
+                        Ok(_) => {
+                            sizeusizeptr.fetch_add(1, SeqCst);
+                            return 0;
+                        },
+                        Err(_) => {
+                            pos += 1;
+                            continue;
+                        },
+                    }
+                }
+
+                let descr = BaseDescr::PushDescrType(PushDescr::new(pos, realvalue));
+
+                let ligma = spot.compare_and_set(expectedptr, pack_descr(descr, guard), SeqCst, guard);
+
+
+            }
+            // let expected = unsafe { spotptr.deref() }.clone();
+        }
+
+        0
     }
 
     pub fn complete_push(&self, spot: Atomic<usize>, old: Shared<usize>, descr: PushDescr, guard: &Guard) -> bool {
@@ -270,17 +322,17 @@ impl WaitFreeVector {
     }
 }
 
-impl Vector for WaitFreeVector {
-    fn push_back(&self, value: usize) -> bool {
-        todo!()
-    }
-    fn pop_back(&self) -> usize { todo!() }
-    fn at(&self, _: usize) -> usize { todo!() }
-    fn insert_at(&self, _: usize, _: usize) -> bool { todo!() }
-    fn erase_at(&self, _: usize) -> bool { todo!() }
-    fn cwrite(&self, _: usize, _: usize) -> bool { todo!() }
-    //fn announce_op(&self, _: (dyn Descriptor + 'static)) { todo!() }
-}
+// impl Vector for WaitFreeVector {
+//     fn push_back(&self, value: usize) -> bool {
+//         todo!()
+//     }
+//     fn pop_back(&self) -> usize { todo!() }
+//     fn at(&self, _: usize) -> usize { todo!() }
+//     fn insert_at(&self, _: usize, _: usize) -> bool { todo!() }
+//     fn erase_at(&self, _: usize) -> bool { todo!() }
+//     fn cwrite(&self, _: usize, _: usize) -> bool { todo!() }
+//     //fn announce_op(&self, _: (dyn Descriptor + 'static)) { todo!() }
+// }
 
 struct Contiguous {
     vector: Atomic<WaitFreeVector>,
@@ -318,7 +370,29 @@ impl Contiguous {
     //     }
     // }
 
-    pub fn get_spot(&self, position: usize) -> Atomic<usize> {
+    pub fn copy_value(&self, position: usize, guard: &Guard) {
+        // let oldptr = self.old.load(SeqCst, guard);
+        // if !oldptr.is_null() {
+        //     let old = unsafe { oldptr.deref() }.clone();
+        //     old.array[position]
+        // }
+
+        // copy value
+        todo!();
+    }
+
+    pub fn get_spot(&self, position: usize, guard: &Guard) -> Atomic<usize> {
+        if position >= self.capacity {
+            // resize
+            todo!();
+        }
+
+        let spot = &self.array[position];
+
+        if spot.load(SeqCst, guard).tag() == TagNotCopied {
+            self.copy_value(position, guard);
+        }
+
         self.array[position].clone()
     }
 }
