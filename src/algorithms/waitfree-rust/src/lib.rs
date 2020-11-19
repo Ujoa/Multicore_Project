@@ -10,11 +10,11 @@ use std::sync::atomic::AtomicUsize;
 // NotCopied when null | 0b01
 // Resizing when non-null | 0b10
 
-const NotValue: usize = 0b00;
-const NotCopied: usize = 0b01;
+// const NotValue: usize = 0b00;
+// const NotCopied: usize = 0b01;
 
-const MarkDesc: usize = 0b01;
-const MarkResize: usize = 0b10;
+// const MarkDesc: usize = 0b01;
+// const MarkResize: usize = 0b10;
 
 const TagNotValue: usize = 1;
 const TagNotCopied: usize = 2;
@@ -183,6 +183,18 @@ impl WaitFreeVector {
         }
     }
 
+    pub fn at(&self, tid: usize, pos: usize) -> Option<usize> {
+        // let guard = &epoch::pin();
+
+        // let shsize = self.size.load(SeqCst, guard);
+        // let sizeusizeptr = unsafe { shsize.deref() }.clone();
+        // let size = sizeusizeptr.load(SeqCst);
+
+        // if pos < size
+
+        None
+    }
+
     pub fn push_back(&self, tid: usize, value: usize) -> usize {
         let guard = &epoch::pin();
         
@@ -213,7 +225,7 @@ impl WaitFreeVector {
                             return 0;
                         },
                         Err(_) => {
-                            println!("&");
+                            
                             pos += 1;
                             continue;
                         },
@@ -238,12 +250,14 @@ impl WaitFreeVector {
                 }
             }
             else {
+                dbg!(expectedptr);
                 match unpack_descr(expectedptr, guard) {
                     Some(x) => {
                         let descr = unsafe { x.deref() }.clone();
                         self.complete_base(spot, expectedptr, &descr, guard);
                     }
                     None => {
+                        println!("&");
                         pos += 1;
                     }
                 }
@@ -378,7 +392,8 @@ struct Contiguous {
 impl Contiguous {
     // pub fn new(vector: Atomic<WaitFreeVector>, capacity: usize) -> Contiguous {
     pub fn new(capacity: usize) -> Contiguous {
-        let arr = vec![Atomic::<usize>::null(); capacity];
+        let init: Shared<usize> = Shared::null().with_tag(TagNotValue);
+        let arr: Vec<Atomic<usize>> = vec![Atomic::from(init); capacity];
 
         // Will use later for NotCopied
         // for i in 0..capacity {
@@ -407,9 +422,9 @@ impl Contiguous {
     pub fn get_spot(&self, position: usize, guard: &Guard) -> Atomic<usize> {
         if position >= self.capacity {
             // resize
-            dbg!(position);
-            dbg!(self.capacity);
-            todo!();
+            // dbg!(position);
+            // dbg!(self.capacity);
+            // todo!();
         }
 
         let spot = &self.array[position];

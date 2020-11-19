@@ -6,7 +6,6 @@ use rand::Rng;
 use std::time::{Instant, Duration};
 
 
-
 // fn test_pushback(num_threads: i32){
 
 //     println!("TEST PUSHBACK {} threads", num_threads);
@@ -270,9 +269,34 @@ fn main(){
     // test_pushback(num);
     // test_popback(num);
 
-    let vec = WaitFreeVector::new(100);
+    let capacity = 100;
+    let num_threads = 8;
+    assert!(num_threads < capacity);
+    
+    let vec = Arc::new(WaitFreeVector::new(10_000_000));
+    let mut handles = Vec::new();
+    
+    for i in 0..num_threads {
 
-    vec.push_back(0, 10);
-    vec.push_back(0, 11);
-    vec.push_back(0, 12);
+        let vec_thread = vec.clone();
+        handles.push(
+            thread::spawn(
+                move || {
+                    for _ in 0..100 {
+                        vec_thread.push_back(i, i*10);
+                    }
+                }
+            )
+        );
+    }
+
+    for handle in handles {
+        handle.join().unwrap();
+    }
+
+    // let vec = WaitFreeVector::new(100);
+
+    // vec.push_back(0, 10);
+    // vec.push_back(0, 11);
+    // vec.push_back(0, 12);
 }
