@@ -269,34 +269,37 @@ fn main(){
     // test_pushback(num);
     // test_popback(num);
 
-    let capacity = 100;
-    let num_threads = 8;
-    assert!(num_threads < capacity);
+    // let capacity = 100;
+    // let num_threads = 8;
+    // assert!(num_threads < capacity);
     
-    let vec = Arc::new(WaitFreeVector::new(10_000_000));
-    let mut handles = Vec::new();
+    // let vec = Arc::new(WaitFreeVector::new(100));
+    // let mut handles = Vec::new();
     
-    for i in 0..num_threads {
+    // for i in 0..num_threads {
 
-        let vec_thread = vec.clone();
-        handles.push(
-            thread::spawn(
-                move || {
-                    for _ in 0..100 {
-                        vec_thread.push_back(i, i*10);
-                    }
-                }
-            )
-        );
-    }
+    //     let vec_thread = vec.clone();
+    //     handles.push(
+    //         thread::spawn(
+    //             move || {
+    //                 for _ in 0..2 {
+    //                     vec_thread.push_back(i, i*10);
+    //                 }
 
-    for handle in handles {
-        handle.join().unwrap();
-    }
+    //                 vec_thread.at(0, i)
+    //             }
+    //         )
+    //     );
+    // }
 
-    // let vec = WaitFreeVector::new(100);
+    // for handle in handles {
+    //     handle.join().unwrap();
+    // }
 
-    // vec.push_back(0, 10);
-    // vec.push_back(0, 11);
-    // vec.push_back(0, 12);
+    let vec = WaitFreeVector::new(100);
+
+    vec.push_back(0, 10);
+    vec.push_back(0, 11);
+    vec.push_back(0, 12);
+    dbg!(vec.at(0, 2));
 }

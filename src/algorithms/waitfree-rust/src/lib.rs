@@ -153,6 +153,14 @@ pub fn loadstate<'g>(newdescr: &PushDescr, guard: &'g Guard) -> (Shared<'g, u8>,
     (mystate, rawstate)
 }
 
+// returns None if the value is NotValue
+pub fn value_base(descr: BaseDescr) -> Option<usize> {
+    match descr {
+        BaseDescr::PushDescrType(d) => Some(d.value),
+        _ => None,
+    }
+}
+
 pub struct WaitFreeVector {
     storage: Atomic<Contiguous>,
     size: Atomic<AtomicUsize>,
@@ -183,14 +191,33 @@ impl WaitFreeVector {
         }
     }
 
+    
+
     pub fn at(&self, tid: usize, pos: usize) -> Option<usize> {
-        // let guard = &epoch::pin();
+        let guard = &epoch::pin();
 
-        // let shsize = self.size.load(SeqCst, guard);
-        // let sizeusizeptr = unsafe { shsize.deref() }.clone();
-        // let size = sizeusizeptr.load(SeqCst);
+        let shsize = self.size.load(SeqCst, guard);
+        let sizeusizeptr = unsafe { shsize.deref() }.clone();
+        let size = sizeusizeptr.load(SeqCst);
 
-        // if pos < size
+        if pos < size {
+            let slot = self.get_spot(pos, guard);
+            let ptr = slot.load(SeqCst, guard);
+
+            if ptr.tag() == TagNotValue {
+                return None;
+            }
+
+            match unpack_descr(ptr, guard) {
+                Some(x) => {
+                    let descval = unsafe { x.deref() }.clone();
+                    return value_base(descval);
+                },
+                None => {
+                    return Some(unsafe { ptr.deref() }.clone());
+                },
+            }
+        }
 
         None
     }
