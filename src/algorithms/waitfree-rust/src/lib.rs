@@ -21,7 +21,7 @@ const TagNotCopied: usize = 1;
 const TagDescr: usize = 2;
 const TagResize: usize = 3;
 
-const LIMIT: usize = 1000;
+const LIMIT: usize = usize::MAX;
 
 
 pub trait Vector {
@@ -168,10 +168,11 @@ impl WaitFreeVector {
         spot
     }
     
-    pub fn complete_base(&self, spot: Atomic<usize>, old: Shared<usize>, descr: BaseDescr, guard: &Guard) {
+    pub fn complete_base(&self, spot: Atomic<usize>, old: Shared<usize>, descr: &BaseDescr, guard: &Guard) -> bool {
+        // let cdescr = descr.clone();
         match descr {
-            BaseDescr::PushDescrType(d) => { self.complete_push(spot, old, d, guard); },
-            _ => (),
+            BaseDescr::PushDescrType(d) => self.complete_push(spot, old, d, guard),
+            _ => false,
         }
     }
 
@@ -213,17 +214,41 @@ impl WaitFreeVector {
 
                 let descr = BaseDescr::PushDescrType(PushDescr::new(pos, realvalue));
 
-                let ligma = spot.compare_and_set(expectedptr, pack_descr(descr, guard), SeqCst, guard);
+                let descrptr = pack_descr(descr, guard);
 
-
+                match spot.compare_and_set(expectedptr, descrptr, SeqCst, guard) {
+                    Ok(_) => {
+                        if self.complete_base(spot, descrptr, &descr, guard) {
+                            sizeusizeptr.fetch_add(1, SeqCst);
+                            return pos;
+                        }
+                        else {
+                            pos -= 1;
+                        }
+                    },
+                    Err(_) => (),
+                }
             }
-            // let expected = unsafe { spotptr.deref() }.clone();
+            else {
+                match unpack_descr(expectedptr, guard) {
+                    Some(x) => {
+                        let descr = unsafe { x.deref() }.clone();
+                        self.complete_base(spot, expectedptr, &descr, guard);
+                    }
+                    None => {
+                        pos += 1;
+                    }
+                }
+            }
+            // let expected: usize = unsafe { spotptr.deref() }.clone();
         }
+
+        // TODO: add this op to annoucement table 
 
         0
     }
 
-    pub fn complete_push(&self, spot: Atomic<usize>, old: Shared<usize>, descr: PushDescr, guard: &Guard) -> bool {
+    pub fn complete_push(&self, spot: Atomic<usize>, old: Shared<usize>, descr: &PushDescr, guard: &Guard) -> bool {
         // use WaitFreeVector;
 
         let newdescr: PushDescr = descr.clone();
