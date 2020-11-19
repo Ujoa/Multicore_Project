@@ -213,12 +213,12 @@ impl WaitFreeVector {
                 }
 
                 let descr = BaseDescr::PushDescrType(PushDescr::new(pos, realvalue));
-
+                let cdescr = descr.clone();
                 let descrptr = pack_descr(descr, guard);
 
                 match spot.compare_and_set(expectedptr, descrptr, SeqCst, guard) {
                     Ok(_) => {
-                        if self.complete_base(spot, descrptr, &descr, guard) {
+                        if self.complete_base(spot, descrptr, &cdescr, guard) {
                             sizeusizeptr.fetch_add(1, SeqCst);
                             return pos;
                         }
@@ -299,7 +299,7 @@ impl WaitFreeVector {
                 descr.state.compare_and_set(mystate, Owned::new(STATE_PASSED), SeqCst, guard);
             }
 
-            self.complete_base(spot2, current, basedescr, guard);
+            self.complete_base(spot2, current, &basedescr, guard);
             
             // Reset for next loop
             // let mystate = newdescr.state.load(SeqCst, guard);
