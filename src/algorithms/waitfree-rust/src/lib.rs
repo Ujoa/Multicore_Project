@@ -16,10 +16,10 @@ const NotCopied: usize = 0b01;
 const MarkDesc: usize = 0b01;
 const MarkResize: usize = 0b10;
 
-const TagNotValue: usize = 0;
-const TagNotCopied: usize = 1;
-const TagDescr: usize = 2;
-const TagResize: usize = 3;
+const TagNotValue: usize = 1;
+const TagNotCopied: usize = 2;
+const TagDescr: usize = 3;
+const TagResize: usize = 4;
 
 const LIMIT: usize = usize::MAX;
 
@@ -159,6 +159,13 @@ pub struct WaitFreeVector {
 }
 
 impl WaitFreeVector {
+    pub fn new(capacity: usize) -> WaitFreeVector {
+        WaitFreeVector{
+            storage: Atomic::new(Contiguous::new(capacity)),
+            size: Atomic::new(AtomicUsize::new(0)),
+        }
+    }
+
     pub fn length(&self) -> usize{todo!()}
     pub fn get_spot(&self, position: usize, guard: &Guard) -> Atomic<usize> {
         let contigptr = self.storage.load(SeqCst, guard);
@@ -176,19 +183,19 @@ impl WaitFreeVector {
         }
     }
 
-    pub fn push_back(&self, tid: usize, value: Owned<usize>) -> usize {
+    pub fn push_back(&self, tid: usize, value: usize) -> usize {
         let guard = &epoch::pin();
         
         // TODO: announcement table
 
-        let shvalue = value.into_shared(guard);
+        let shvalue = Owned::new(value).into_shared(guard);
 
         if shvalue.is_null() {
             panic!("CANNOT PUSH NULL POINTER");
         }
         
         // Should be safe, user should never pass us a descriptor
-        let realvalue = unsafe { shvalue.deref() }.clone();
+        // let realvalue = unsafe { shvalue.deref() }.clone();
 
         let shsize = self.size.load(SeqCst, guard);
         let sizeusizeptr = unsafe { shsize.deref() }.clone();
@@ -206,13 +213,14 @@ impl WaitFreeVector {
                             return 0;
                         },
                         Err(_) => {
+                            println!("&");
                             pos += 1;
                             continue;
                         },
                     }
                 }
 
-                let descr = BaseDescr::PushDescrType(PushDescr::new(pos, realvalue));
+                let descr = BaseDescr::PushDescrType(PushDescr::new(pos, value));
                 let cdescr = descr.clone();
                 let descrptr = pack_descr(descr, guard);
 
@@ -360,7 +368,7 @@ impl WaitFreeVector {
 // }
 
 struct Contiguous {
-    vector: Atomic<WaitFreeVector>,
+    // vector: Atomic<WaitFreeVector>,
     old: Atomic<Contiguous>,
     capacity: usize,
     // array is a regular array of atomic pointers
@@ -368,7 +376,8 @@ struct Contiguous {
 }
 
 impl Contiguous {
-    pub fn new(vector: Atomic<WaitFreeVector>, capacity: usize) -> Contiguous {
+    // pub fn new(vector: Atomic<WaitFreeVector>, capacity: usize) -> Contiguous {
+    pub fn new(capacity: usize) -> Contiguous {
         let arr = vec![Atomic::<usize>::null(); capacity];
 
         // Will use later for NotCopied
@@ -377,23 +386,12 @@ impl Contiguous {
         // }
 
         Contiguous {
-            vector,
+            // vector,
             old: Atomic::null(),
             capacity,
             array: arr,
         }
     }
-
-    // pub fn new(vector: Box<WaitFreeVector>, old: Box<Contiguous>, capacity: usize) -> Contiguous {
-        
-    //     let arr = vec![]
-    //     Contiguous {
-    //         vector,
-    //         old,
-    //         capacity,
-
-    //     }
-    // }
 
     pub fn copy_value(&self, position: usize, guard: &Guard) {
         // let oldptr = self.old.load(SeqCst, guard);
@@ -409,6 +407,8 @@ impl Contiguous {
     pub fn get_spot(&self, position: usize, guard: &Guard) -> Atomic<usize> {
         if position >= self.capacity {
             // resize
+            dbg!(position);
+            dbg!(self.capacity);
             todo!();
         }
 
