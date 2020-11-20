@@ -174,13 +174,78 @@ impl WaitFreeVector {
         }
     }
 
-    pub fn length(&self) -> usize{todo!()}
+    pub fn length(&self) -> usize{
+        let guard = &epoch::pin();
+        let shsize = self.size.load(SeqCst, guard);
+        let sizeusizeptr = unsafe { shsize.deref() }.clone();
+        sizeusizeptr.load(SeqCst)
+    }
+
     pub fn get_spot(&self, position: usize, guard: &Guard) -> Atomic<usize> {
         let contigptr = self.storage.load(SeqCst, guard);
         let contig = unsafe { contigptr.deref() };
+
+        if position >= contig.capacity {
+            self.resize();
+            return self.get_spot(position, guard);
+        }
         let spot = contig.get_spot(position, guard);
 
         spot
+    }
+
+    pub fn resize(&self){
+
+        println!("Resize!");
+        let guard = &epoch::pin();
+        let old = self.storage.load(SeqCst, guard);
+
+        let mut prefix = 0;
+        if !old.is_null() {
+            let old = unsafe {old.deref()};
+            prefix = old.capacity; 
+        }
+
+        let new_capacity = prefix * 2 + 1;
+
+        let mut arr: Vec<Atomic<usize>> = Vec::with_capacity(new_capacity);
+        for i in 0..new_capacity {
+            if i < prefix {
+                let init: Shared<usize> = Shared::null().with_tag(TagNotCopied);
+                arr.push(Atomic::from(init));
+            }
+            else {
+                let init: Shared<usize> = Shared::null().with_tag(TagNotValue);
+                arr.push(Atomic::from(init));
+            }
+        }
+
+        let old_atomic = self.storage.clone();
+        
+        let v_new = Contiguous{
+            old: old_atomic,
+            capacity: new_capacity, 
+            array: Atomic::new(arr),
+        };
+
+        let shared_cont = self.storage.load(SeqCst, guard);
+
+        match self.storage.compare_and_set(
+            shared_cont, Owned::new(v_new), SeqCst,guard) {
+            Ok(_) => {
+                let shared_newv = self.storage.load(SeqCst, guard);
+                let newv = unsafe {shared_newv.deref()};
+                for i in 0..new_capacity{
+                    newv.copy_value(i, guard);
+                }
+            },
+            Err(_) => {
+                panic!("Resize Failed");
+            },
+        }
+
+
+
     }
     
     pub fn complete_base(&self, spot: Atomic<usize>, old: Shared<usize>, descr: &BaseDescr, guard: &Guard) -> bool {
@@ -243,7 +308,7 @@ impl WaitFreeVector {
         for failures in 0..=LIMIT {
             let spot = self.get_spot(pos, guard);
             let expectedptr = spot.load(SeqCst, guard);
-            if expectedptr.tag() == TagNotValue {
+            if expectedptr.tag() == TagNotValue || expectedptr.tag() == TagNotCopied{
                 if pos == 0 {
                     let res = spot.compare_and_set(expectedptr, shvalue, SeqCst, guard);
                     match res {
@@ -413,14 +478,14 @@ struct Contiguous {
     old: Atomic<Contiguous>,
     capacity: usize,
     // array is a regular array of atomic pointers
-    array: Vec<Atomic<usize>>,
+    array: Atomic<Vec<Atomic<usize>>>,
 }
 
 impl Contiguous {
     // pub fn new(vector: Atomic<WaitFreeVector>, capacity: usize) -> Contiguous {
     pub fn new(capacity: usize) -> Contiguous {
         let init: Shared<usize> = Shared::null().with_tag(TagNotValue);
-        let arr: Vec<Atomic<usize>> = vec![Atomic::from(init); capacity];
+        let arr: Atomic<Vec<Atomic<usize>>> = Atomic::new(vec![Atomic::from(init); capacity]);
 
         // Will use later for NotCopied
         // for i in 0..capacity {
@@ -435,32 +500,42 @@ impl Contiguous {
         }
     }
 
-    pub fn copy_value(&self, position: usize, guard: &Guard) {
-        // let oldptr = self.old.load(SeqCst, guard);
-        // if !oldptr.is_null() {
-        //     let old = unsafe { oldptr.deref() }.clone();
-        //     old.array[position]
-        // }
 
+
+
+    pub fn copy_value(&self, position: usize, guard: &Guard) {
+        let oldptr = self.old.load(SeqCst, guard);
+        if !oldptr.is_null(){
+            let old = unsafe { oldptr.deref() }.clone();
+            let load_vec = unsafe {old.array.load(SeqCst, guard).deref()};
+            if position < load_vec.len(){
+                let val = load_vec[position].load(SeqCst, guard);
+                if val.tag() == TagNotCopied {
+                    old.copy_value(position, guard);
+                }
+            }
+            
+        }
         // copy value
-        todo!();
+        // todo!();
     }
 
     pub fn get_spot(&self, position: usize, guard: &Guard) -> Atomic<usize> {
-        if position >= self.capacity {
-            // resize
-            // dbg!(position);
-            // dbg!(self.capacity);
-            // todo!();
-        }
+        // if position >= self.capacity {
+        //     // resize
+        //     // dbg!(position);
+        //     // dbg!(self.capacity);
+        //     // todo!();
+        // }
+        
+        let vec = unsafe {self.array.load(SeqCst,guard).deref()};
+        let spot = vec[position].load(SeqCst, guard);
 
-        let spot = &self.array[position];
-
-        if spot.load(SeqCst, guard).tag() == TagNotCopied {
+        if spot.tag() == TagNotCopied {
             self.copy_value(position, guard);
         }
 
-        self.array[position].clone()
+        vec[position].clone()
     }
 }
 
