@@ -196,7 +196,6 @@ impl WaitFreeVector {
 
     pub fn resize(&self){
 
-        println!("Resize!");
         let guard = &epoch::pin();
         let old = self.storage.load(SeqCst, guard);
 
@@ -238,6 +237,7 @@ impl WaitFreeVector {
                 for i in 0..new_capacity{
                     newv.copy_value(i, guard);
                 }
+                // println!("Resize {} ", new_capacity);
             },
             Err(_) => {
                 panic!("Resize Failed");

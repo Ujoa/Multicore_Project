@@ -73,8 +73,8 @@ mod tests {
     #[test]
     fn threaded_resize(){
         let capacity = 1;
-        let num_threads = 10;
-        let times = 10;
+        let num_threads = 4;
+        let times = 5;
         assert!(num_threads*times > capacity);
         
         let vec = Arc::new(WaitFreeVector::new(100));
@@ -97,6 +97,7 @@ mod tests {
         for handle in handles {
             handle.join().unwrap();
         }
+        println!("{}", vec.length());
         assert_eq!(vec.length(), num_threads * times);
         }
 }
@@ -105,13 +106,43 @@ mod tests {
 
 fn main(){
 
-    let vec = WaitFreeVector::new(3);
-    vec.push_back(0, 1);
-    vec.push_back(0, 2);
-    vec.push_back(0, 2);
-    // vec.resize();
-    vec.push_back(0, 2);
-    println!("ligma");
+    // let vec = WaitFreeVector::new(3);
+    // vec.push_back(0, 1);
+    // vec.push_back(0, 2);
+    // vec.push_back(0, 2);
+    // // vec.resize();
+    // vec.push_back(0, 2);
+    // vec.push_back(0, 2);
+    // vec.push_back(0, 2);
+    // vec.push_back(0, 2);
+    // vec.push_back(0, 2);
+    // println!("ligma");
+
+    let capacity = 10000;
+    let num_threads = 16;
+    let times = 400;
+    
+    let vec = Arc::new(WaitFreeVector::new(num_threads+1));
+    let mut handles = Vec::new();
+    
+    for i in 0..num_threads {
+
+        let vec_thread = vec.clone();
+        handles.push(
+            thread::spawn(
+                move || {
+                    for _ in 0..times {
+                        vec_thread.push_back(i, i*i);
+                    }
+                }
+            )
+        );
+    }
+
+    for handle in handles {
+        handle.join().unwrap();
+    }
+    println!("{}", vec.length());
 
 
 }
