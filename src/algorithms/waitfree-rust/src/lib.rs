@@ -2,7 +2,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use crossbeam_epoch::{self as epoch, Atomic, Guard, Shared, Owned};
 use std::sync::atomic::Ordering::SeqCst;
-use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{AtomicUsize, AtomicBool};
 
 
 // IsDescriptor when non-nul | 0b01
@@ -20,6 +20,8 @@ const TagNotValue: usize = 1;
 const TagNotCopied: usize = 2;
 const TagDescr: usize = 3;
 const TagResize: usize = 4;
+
+const NO_RESULT: usize = usize::MAX;
 
 const LIMIT: usize = usize::MAX;
 
@@ -82,21 +84,6 @@ impl PushDescr {
             state: Atomic::new(STATE_UNDECIDED),
         }
     }
-
-    // pub fn statecas(&self, expected: Shared<u8>, new: Owned<u8>, guard: &Guard) {
-    //     self.state.compare_and_set(expected, new, SeqCst, guard);
-    // }
-
-    // pub fn stateload(&self, guard: &Guard) -> (Shared<u8>, &Guard) {
-    //     (self.state.load(SeqCst, guard), guard)
-    // }
-
-    // pub fn give_me(&self) -> PushDescr {
-    //     PushDescr {
-    //         value: self.value,
-
-    //     }
-    // }
 }
 
 impl DescriptorTrait for PushDescr {
@@ -161,9 +148,44 @@ pub fn value_base(descr: BaseDescr) -> Option<usize> {
     }
 }
 
+pub enum BaseOp {
+    PushOpType(PushOp),
+    PopOpType(PopOp),
+}
+
+pub struct PushOp {
+    done: Atomic<AtomicBool>,
+    value: usize,
+    result: Atomic<AtomicUsize>,
+    can_return: Atomic<AtomicBool>,
+}
+impl PushOp {
+    pub fn new(value: usize) -> PushOp {
+        PushOp {
+            done: Atomic::new(AtomicBool::new(false)),
+            value,
+            result: Atomic::new(AtomicUsize::new(NO_RESULT)),
+            can_return: Atomic::new(AtomicBool::new(false)),
+        }
+    }
+}
+
+pub struct PopOp {
+
+}
+
+pub fn help_if_needed(tid: usize) {
+    
+}
+
+pub fn help(mytid: usize, tid: usize) {
+    // let t_op
+}
+
 pub struct WaitFreeVector {
     storage: Atomic<Contiguous>,
     size: Atomic<AtomicUsize>,
+
 }
 
 impl WaitFreeVector {
@@ -183,7 +205,7 @@ impl WaitFreeVector {
         spot
     }
     
-    pub fn complete_base(&self, spot: Atomic<usize>, old: Shared<usize>, descr: &BaseDescr, guard: &Guard) -> bool {
+    pub fn complete_base(&self, spot: &Atomic<usize>, old: Shared<usize>, descr: &BaseDescr, guard: &Guard) -> bool {
         // let cdescr = descr.clone();
         match descr {
             BaseDescr::PushDescrType(d) => self.complete_push(spot, old, d, guard),
@@ -191,7 +213,60 @@ impl WaitFreeVector {
         }
     }
 
-    
+    // the an_ prefix means this method is to complete an op on the announcement table, not in a descriptor
+    pub fn an_complete_push(&self, tid: usize, spot: &Atomic<usize>, expected: Shared<usize>, op: &PushOp, guard: &Guard) -> bool {
+        // use WaitFreeVector;
+
+        let shsize = self.size.load(SeqCst, guard);
+        let usizeptr = unsafe { shsize.deref() }.clone();
+        let mut pos = usizeptr.load(SeqCst);
+
+        loop {
+            let doneptr = op.done.load(SeqCst, guard);
+            let done = unsafe { doneptr.deref() };
+            let rawdone = done.load(SeqCst);
+
+            if rawdone {
+                break;
+            }
+
+            // let expected = spot.load(SeqCst, guard);
+
+            if let Some(x) = unpack_descr(expected, guard) {
+                let base = unsafe { x.deref() };
+                self.complete_base(spot, expected, base, guard);
+                continue;
+            }
+
+            if expected.tag() != TagNotValue {
+                pos += 1;
+                continue;
+            }
+
+            let descr = BaseDescr::PushDescrType(PushDescr::new(pos, op.value));
+            let cdescr = descr.clone();
+            let descrptr = pack_descr(descr, guard);
+
+            match spot.compare_and_set(expected, descrptr, SeqCst, guard) {
+                Ok(_) => {
+                    if self.complete_base(&spot, descrptr, &cdescr, guard) {
+                        let resptr = op.result.load(SeqCst, guard);
+                        let res = op.
+                        usizeptr.fetch_add(1, SeqCst);
+                        return pos;
+                    }
+                    else {
+                        pos -= 1;
+                    }
+                },
+                Err(_) => (),
+            }
+        }
+
+        return false;
+
+        
+    }
 
     pub fn at(&self, tid: usize, pos: usize) -> Option<usize> {
         let guard = &epoch::pin();
@@ -265,7 +340,7 @@ impl WaitFreeVector {
 
                 match spot.compare_and_set(expectedptr, descrptr, SeqCst, guard) {
                     Ok(_) => {
-                        if self.complete_base(spot, descrptr, &cdescr, guard) {
+                        if self.complete_base(&spot, descrptr, &cdescr, guard) {
                             sizeusizeptr.fetch_add(1, SeqCst);
                             return pos;
                         }
@@ -281,7 +356,7 @@ impl WaitFreeVector {
                 match unpack_descr(expectedptr, guard) {
                     Some(x) => {
                         let descr = unsafe { x.deref() }.clone();
-                        self.complete_base(spot, expectedptr, &descr, guard);
+                        self.complete_base(&spot, expectedptr, &descr, guard);
                     }
                     None => {
                         println!("&");
@@ -297,7 +372,7 @@ impl WaitFreeVector {
         0
     }
 
-    pub fn complete_push(&self, spot: Atomic<usize>, old: Shared<usize>, descr: &PushDescr, guard: &Guard) -> bool {
+    pub fn complete_push(&self, spot: &Atomic<usize>, old: Shared<usize>, descr: &PushDescr, guard: &Guard) -> bool {
         // use WaitFreeVector;
 
         let newdescr: PushDescr = descr.clone();
@@ -348,7 +423,7 @@ impl WaitFreeVector {
                 descr.state.compare_and_set(mystate, Owned::new(STATE_PASSED), SeqCst, guard);
             }
 
-            self.complete_base(spot2, current, &basedescr, guard);
+            self.complete_base(&spot2, current, &basedescr, guard);
             
             // Reset for next loop
             // let mystate = newdescr.state.load(SeqCst, guard);
