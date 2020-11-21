@@ -12,14 +12,14 @@ mod tests {
 
     #[test]
     fn insert_vals_seq(){
-        let vec = WaitFreeVector::new(3);
+        let vec = WaitFreeVector::new(3, 1);
         vec.push_back(0, 10);
         vec.push_back(0, 11);
         vec.push_back(0, 12);
     }
     #[test]
     fn len_seq(){
-        let vec = WaitFreeVector::new(3);
+        let vec = WaitFreeVector::new(3, 1);
         vec.push_back(0, 10);
         vec.push_back(0, 11);
         assert_eq!(vec.length(), 2);
@@ -35,7 +35,7 @@ mod tests {
 
     #[test]
     fn seq_at(){
-        let vec = WaitFreeVector::new(2);
+        let vec = WaitFreeVector::new(2, 1);
         vec.push_back(0, 10);
         vec.at(0, 0);
     }
@@ -47,7 +47,7 @@ mod tests {
         let times = 12;
         assert!(num_threads*times < capacity);
         
-        let vec = Arc::new(WaitFreeVector::new(100));
+        let vec = Arc::new(WaitFreeVector::new(100, num_threads));
         let mut handles = Vec::new();
         
         for i in 0..num_threads {
@@ -77,7 +77,7 @@ mod tests {
         let times = 5;
         assert!(num_threads*times > capacity);
         
-        let vec = Arc::new(WaitFreeVector::new(100));
+        let vec = Arc::new(WaitFreeVector::new(100, num_threads));
         let mut handles = Vec::new();
         
         for i in 0..num_threads {
@@ -122,7 +122,7 @@ fn main(){
     let num_threads = 16;
     let times = 400;
     
-    let vec = Arc::new(WaitFreeVector::new(num_threads+1));
+    let vec = Arc::new(WaitFreeVector::new(num_threads+1, num_threads));
     let mut handles = Vec::new();
     
     for i in 0..num_threads {
