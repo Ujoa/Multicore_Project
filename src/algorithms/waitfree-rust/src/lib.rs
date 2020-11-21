@@ -42,16 +42,11 @@ const STATE_UNDECIDED: u8 = 0x00;
 const STATE_FAILED: u8 = 0x01;
 const STATE_PASSED: u8 = 0x02;
 
-trait DescriptorTrait {
-    // fn descr_type() -> DescriptorType;
-    fn complete(&self, guard: &Guard) -> bool;
-    fn value(&self) -> usize;
-}
-
 #[derive(Clone)]
 pub enum BaseDescr {
     PushDescrType(PushDescr),
     PopDescrType(PopDescr),
+    PopSubDescrType(PopSubDescr),
 }
 
 // contains the value to be pushed and a state member
@@ -104,6 +99,17 @@ pub fn unpack_descr<'g>(curr: Shared<usize>, guard: &'g Guard) -> Option<Shared<
     }
     else {
         None
+    }
+}
+
+pub fn is_descr(curr: Shared<usize>, guard: &'g Guard) -> bool {
+    let unmasked: Shared<BaseDescr> = unsafe { std::mem::transmute(curr) };
+    
+    if unmasked.tag() == TagDescr && unmasked != TagDescr {
+        return true;
+    }
+    else {
+        return false;
     }
 }
 
@@ -474,20 +480,70 @@ impl WaitFreeVector {
         
     pub fn complete_pop(&self, spot: Atomic<usize>, old: Shared<usize>, descr: &PopDescr, guard: &Guard) -> bool {
     
+        let newdescr = descr.clone();
+
         let vectorptr = self.vec.load(SeqCst, guard);
         let vector = unsafe { vectorptr.deref() };
         let spot = vector.get_spot(self.pos, guard);
 
-        let child = descr.child;
-        let mut value = child.load(SeqCst);
+        let child = self.child;
+        let mut value = child.load(SeqCst, guard);
         let mut failures: usize = 0;
 
+        let (mut mystate, mut rawstate) = loadstate(&newdescr, guard);
+
         while !value {
+            let temp = loadstate(&newdescr, guard);
+            mystate = temp.0;
+            rawstate = temp.1;
+
             failures += 1;
             if failures >= LIMIT {
-                descr.state.compare_and_set(mystate, Owned::new(STATE_PASSED), SeqCst, guard);
+                child.compare_and_set(mystate, Owned::new(STATE_FAILED), SeqCst, guard);
+                break;
+            }
+
+            let spot: Atomic<usize> = self.get_spot(newdescr.pos - 1, guard);
+            let expected: Shared<usize> = spot.load(SeqCst, guard);
+            let unpackres = unpack_descr(expected, guard);
+            match unpackres {
+                None => break,
+                _ => (),
+            }
+            let baseptr = unpackres.unwrap();
+            let basedescr = unsafe { baseptr.deref() }.clone();
+
+            if expected.tag() == TagNotValue {
+                child.compare_and_set(mystate, Owned::new(STATE_FAILED), SeqCst, guard);
+            }
+            else if vector.is_descr(expected) { 
+                self.complete_base(spot, expected, &basedescr, guard);
+            }
+            else {
+                let popsubdescr = BaseDescr::PopSubDescrType(PopSubDescr::new(self, expected));
+                let packed = vector.pack_descr(popsubdescr);
+
+                if spot.compare_and_set(expected, packed, SeqCst, guard) {
+                    let psh_type = Some(popsubdescr);
+
+                    if psh_type {
+                        child.compare_and_set(mystate, popsubdescr, SeqCst, guard);
+                    } 
+                    if value == popsubdescr {
+                        spot.compare_and_set(packed, NotValue, SeqCst, guard);
+                    }
+                    else {
+                        let packdescr = vector.packdescr(self);
+                        spot.compare_and_set(packdescr, expected, SeqCst, guard);
+                    }
+                }
             }
         }
+        
+        let packing = self.vec.pack_descr(self);
+        self.vec.get_spot(newdescr.pos, guard).compare_and_set(packing, NotValue, SeqCst, guard);
+        
+        return self.child.load(SeqCst, guard) != STATE_FAILED;
 
     }
 }
@@ -576,37 +632,13 @@ pub struct PopDescr {
 
 impl PopDescr {
     // vec: Atomic<WaitFreeVector>, 
-    pub fn new(pos: usize, value: usize) -> PopDescr {
+    pub fn new(pos: usize) -> PopDescr {
         PopDescr {
             // vec,
             pos,
-            state: Atomic::new(STATE_UNDECIDED),
+            child,
         }
     }
-}
-
-impl DescriptorTrait for PopDescr {
-
-    // fn descr_type() -> DescriptorType {
-    //     DescriptorType::PushDescrType
-    // }
-    
-    fn complete(&self, guard: &Guard) -> bool {
-
-        let vectorptr = self.vec.load(SeqCst, guard);
-        let vector = unsafe { vectorptr.deref() };
-        let spot = vector.get_spot(self.pos, guard);
-
-        
-        
-        true
-    }
-
-    fn value(&self) -> usize {
-        todo!()
-    }
-
-    
 }
 
 // PopSubDescr consists of a reference to a previously placed PopDescr (parent)
@@ -615,13 +647,6 @@ struct PopSubDescr {
     parent: Rc<PopDescr>,
     value: usize,
 }
-
-// #[derive(Clone)]
-// enum DescriptorType {
-//     PushDescrType,
-//     PopDescrType,
-//     PopSubDescrType,
-// }
 
 // contains the value to be pushed and a state member
 struct PushDescr {
@@ -663,18 +688,6 @@ struct ShiftDescr {
 //     }
 // }
 
-// impl DescriptorTrait for PopDescr {
-//     fn descr_type() -> DescriptorType {
-//         DescriptorType::PopDescrType
-//     }
-//     fn complete(&self, guard: &Guard) -> bool {
-//         todo!()
-//     }
-//     fn value(&self) -> usize {
-//         todo!()
-//     }
-// }
-
 
 // impl PopSubDescr {
 //     pub fn new(parent: Rc<PopDescr>, value: usize) -> PopSubDescr {
@@ -685,39 +698,3 @@ struct ShiftDescr {
 //     }
 // }
 
-// impl DescriptorTrait for PopSubDescr {
-//     fn descr_type() -> DescriptorType {
-//         DescriptorType::PopSubDescrType
-//     }
-//     fn complete(&self, guard: &Guard) -> bool {
-//         todo!()
-//     }
-//     fn value(&self) -> usize {
-//         todo!()
-//     }
-// }
-
-
-// impl DescriptorTrait for ShiftOp {
-//     fn descr_type() -> DescriptorType {
-//         todo!()
-//     }
-//     fn complete(&self, guard: &Guard) -> bool {
-//         todo!()
-//     }
-//     fn value(&self) -> usize {
-//         todo!()
-//     }
-// }
-
-// impl DescriptorTrait for ShiftDescr {
-//     fn descr_type() -> DescriptorType {
-//         todo!()
-//     }
-//     fn complete(&self, guard: &Guard) -> bool {
-//         todo!()
-//     }
-//     fn value(&self) -> usize {
-//         todo!()
-//     }
-// }
