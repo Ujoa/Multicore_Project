@@ -69,6 +69,7 @@ pub enum BaseDescr {
 #[derive(Clone)]
 pub struct PushDescr {
     // vec: Atomic<WaitFreeVector>,
+    owner: Atomic<BaseOp>,
     value: usize,
     pos: usize,
     state: Atomic<u8>,
@@ -78,6 +79,7 @@ impl PushDescr {
     // vec: Atomic<WaitFreeVector>, 
     pub fn new(pos: usize, value: usize) -> PushDescr {
         PushDescr {
+            owner: Atomic::null(),
             // vec,
             pos,
             value,
@@ -186,13 +188,31 @@ pub struct WaitFreeVector {
     storage: Atomic<Contiguous>,
     size: Atomic<AtomicUsize>,
 
+    thread_ops: Vec<Atomic<BaseOp>>,
+    thread_to_help: Vec<AtomicUsize>,
+    num_threads: usize,
 }
 
 impl WaitFreeVector {
-    pub fn new(capacity: usize) -> WaitFreeVector {
+    pub fn new(capacity: usize, num_threads: usize) -> WaitFreeVector {
+        let mut thread_ops = Vec::new();
+        let mut thread_to_help = Vec::new();
+
+        for _ in 0..num_threads {
+            let i = Atomic::<BaseOp>::null();
+            thread_ops.push(i);
+
+            let i = AtomicUsize::new(0);
+            thread_to_help.push(i);
+        }
+
         WaitFreeVector{
             storage: Atomic::new(Contiguous::new(capacity)),
             size: Atomic::new(AtomicUsize::new(0)),
+
+            thread_ops,
+            thread_to_help,
+            num_threads,
         }
     }
 
@@ -214,7 +234,7 @@ impl WaitFreeVector {
     }
 
     // the an_ prefix means this method is to complete an op on the announcement table, not in a descriptor
-    pub fn an_complete_push(&self, tid: usize, spot: &Atomic<usize>, expected: Shared<usize>, op: &PushOp, guard: &Guard) -> bool {
+    pub fn an_complete_push(&self, tid: usize, spot: &Atomic<usize>, expected: Shared<usize>, op: &PushOp, opptr: Shared<BaseOp>, guard: &Guard) -> bool {
         // use WaitFreeVector;
 
         let shsize = self.size.load(SeqCst, guard);
@@ -243,15 +263,20 @@ impl WaitFreeVector {
                 continue;
             }
 
-            let descr = BaseDescr::PushDescrType(PushDescr::new(pos, op.value));
-            let cdescr = descr.clone();
+            let pdescr = PushDescr::new(pos, op.value);
+            pdescr.owner.store(opptr, SeqCst);
+            let descr = BaseDescr::PushDescrType(pdescr);
+
+            // let cdescr = descr.clone();
             let descrptr = pack_descr(descr, guard);
 
             match spot.compare_and_set(expected, descrptr, SeqCst, guard) {
                 Ok(_) => {
-                    if self.complete_base(&spot, descrptr, &cdescr, guard) {
-                        let resptr = op.result.load(SeqCst, guard);
-                        let res = op.
+                    let completeres = self.complete_base(&spot, descrptr, &descr, guard);
+                    
+                    if completeres {
+                        op.result.load(SeqCst, guard);
+                        let res = resptr.
                         usizeptr.fetch_add(1, SeqCst);
                         return pos;
                     }
