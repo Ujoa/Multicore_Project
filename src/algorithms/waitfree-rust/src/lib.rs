@@ -23,7 +23,6 @@ const TagResize: usize = 4;
 
 const LIMIT: usize = usize::MAX;
 
-
 pub trait Vector {
     // API Methods
     fn push_back(&self, value: usize) -> bool;
@@ -36,14 +35,6 @@ pub trait Vector {
     // A private method that will be used internally, but
     // not exposed.
     // fn announce_op(&self, descriptor: dyn Descriptor);
-}
-
-
-
-enum PushState {
-    Undecided,
-    Failed,
-    Passed,
 }
 
 // replace pushstate enum
@@ -99,33 +90,6 @@ impl PushDescr {
     // }
 }
 
-impl DescriptorTrait for PushDescr {
-    // fn descr_type() -> DescriptorType {
-    //     DescriptorType::PushDescrType
-    // }
-    fn complete(&self, guard: &Guard) -> bool {
-        // let vectorptr = self.vec.load(SeqCst, guard);
-        // let vector = unsafe { vectorptr.deref() };
-        // let spot = vector.get_spot(self.pos, guard);
-
-        // if self.pos == 0 {
-        //     self.statecas(StateUndecided, StatePassed);
-
-        //     spot.compare_and_set(vector.pack_descr(&self), self.value);
-        // }
-
-        
-
-        
-        true
-    }
-    fn value(&self) -> usize {
-        todo!()
-    }
-
-    
-}
-
 pub fn pack_descr(descr: BaseDescr, guard: &Guard) -> Shared<usize> {
     let ptr = Owned::new(descr).with_tag(TagDescr).into_shared(guard);
     let masked: Shared<usize> = unsafe { std::mem::transmute(ptr) };
@@ -157,6 +121,7 @@ pub fn loadstate<'g>(newdescr: &PushDescr, guard: &'g Guard) -> (Shared<'g, u8>,
 pub fn value_base(descr: BaseDescr) -> Option<usize> {
     match descr {
         BaseDescr::PushDescrType(d) => Some(d.value),
+        BaseDescr::PopDescrType(d) => Some(d.value),
         _ => None,
     }
 }
@@ -252,6 +217,7 @@ impl WaitFreeVector {
         // let cdescr = descr.clone();
         match descr {
             BaseDescr::PushDescrType(d) => self.complete_push(spot, old, d, guard),
+            BaseDescr::PopDescrType(d) => self.complete_pop(spot, old, d, guard),
             _ => false,
         }
     }
@@ -414,18 +380,7 @@ impl WaitFreeVector {
             }
 
             self.complete_base(spot2, current, &basedescr, guard);
-            
-            // Reset for next loop
-            // let mystate = newdescr.state.load(SeqCst, guard);
-            // if mystate.is_null() {
-            //     panic!("STATE OF A DESCRIPTOR WAS NULL IN complete_push")
-            // }
-            // let rawstate: u8 = unsafe { mystate.deref() }.clone();
-
-            
-
-            // let spot2: Atomic<usize> = self.get_spot(newdescr.pos - 1, guard);
-            // let current: Shared<usize> = spot2.load(SeqCst, guard);
+           
         }
 
         let temp = loadstate(&newdescr, guard);
@@ -459,6 +414,82 @@ impl WaitFreeVector {
 
         return rawstate == STATE_PASSED;
     }
+
+    pub fn pop_back(&self, tid: usize) -> (bool, Atomic<usize>) {
+        let guard = &epoch::pin();
+        
+        // TODO: announcement table
+    
+        let shsize = self.size.load(SeqCst, guard);
+        let sizeusizeptr = unsafe { shsize.deref() }.clone();
+        let mut pos = sizeusizeptr.load(SeqCst);
+    
+        for failures in 0..=LIMIT {
+            if pos == 0 {
+                return {false, None};
+            }
+    
+            let spot = self.get_spot(pos, guard);
+            let expectedptr = spot.load(SeqCst, guard);
+            if expectedptr.tag() == TagNotValue {
+                
+                let descr = BaseDescr::PopDescrType(PopDescr::new(self, pos)));
+                let cdescr = descr.clone();
+                let descrptr = pack_descr(descr, guard);
+    
+                match spot.compare_and_set(expectedptr, descrptr, SeqCst, guard) {
+                    Ok(_) => {
+                        let res = self.complete_base(spot, descrptr, &cdescr, guard)
+                        if res {
+                            let newdescr: PopDescr = descr.clone();
+                            let child = newdescr.child;
+                            let mut value = child.load(SeqCst);
+                            
+                            sizeusizeptr.fetch_add(-1, SeqCst);
+                            return {true, value};
+                        }
+                        else {
+                            pos -= 1;
+                        }
+                    },
+                    Err(_) => (),
+    
+                }
+            }
+            else {
+                match unpack_descr(expectedptr, guard) {
+                    Some(x) => {
+                        let descr = unsafe { x.deref() }.clone();
+                        self.complete_base(spot, expectedptr, &descr, guard);
+                    }
+                    None => {
+                        pos += 1;
+                    }
+                }
+            }
+            
+            // announcement table stuff
+        }
+    }
+        
+    pub fn complete_pop(&self, spot: Atomic<usize>, old: Shared<usize>, descr: &PopDescr, guard: &Guard) -> bool {
+    
+        let vectorptr = self.vec.load(SeqCst, guard);
+        let vector = unsafe { vectorptr.deref() };
+        let spot = vector.get_spot(self.pos, guard);
+
+        let child = descr.child;
+        let mut value = child.load(SeqCst);
+        let mut failures: usize = 0;
+
+        while !value {
+            failures += 1;
+            if failures >= LIMIT {
+                descr.state.compare_and_set(mystate, Owned::new(STATE_PASSED), SeqCst, guard);
+            }
+        }
+
+    }
 }
 
 // impl Vector for WaitFreeVector {
@@ -477,6 +508,7 @@ struct Contiguous {
     // vector: Atomic<WaitFreeVector>,
     old: Atomic<Contiguous>,
     capacity: usize,
+
     // array is a regular array of atomic pointers
     array: Atomic<Vec<Atomic<usize>>>,
 }
@@ -500,9 +532,6 @@ impl Contiguous {
         }
     }
 
-
-
-
     pub fn copy_value(&self, position: usize, guard: &Guard) {
         let oldptr = self.old.load(SeqCst, guard);
         if !oldptr.is_null(){
@@ -516,8 +545,6 @@ impl Contiguous {
             }
             
         }
-        // copy value
-        // todo!();
     }
 
     pub fn get_spot(&self, position: usize, guard: &Guard) -> Atomic<usize> {
@@ -539,14 +566,47 @@ impl Contiguous {
     }
 }
 
-
-
 // PopDescr consists solely of a reference to a PopSubDescr (child) which is initially Null.
 #[derive(Clone)]
 pub struct PopDescr {
     vec: Atomic<WaitFreeVector>,
     pos: usize,
     child: Atomic<PopSubDescr>
+}
+
+impl PopDescr {
+    // vec: Atomic<WaitFreeVector>, 
+    pub fn new(pos: usize, value: usize) -> PopDescr {
+        PopDescr {
+            // vec,
+            pos,
+            state: Atomic::new(STATE_UNDECIDED),
+        }
+    }
+}
+
+impl DescriptorTrait for PopDescr {
+
+    // fn descr_type() -> DescriptorType {
+    //     DescriptorType::PushDescrType
+    // }
+    
+    fn complete(&self, guard: &Guard) -> bool {
+
+        let vectorptr = self.vec.load(SeqCst, guard);
+        let vector = unsafe { vectorptr.deref() };
+        let spot = vector.get_spot(self.pos, guard);
+
+        
+        
+        true
+    }
+
+    fn value(&self) -> usize {
+        todo!()
+    }
+
+    
 }
 
 // PopSubDescr consists of a reference to a previously placed PopDescr (parent)
@@ -563,9 +623,19 @@ struct PopSubDescr {
 //     PopSubDescrType,
 // }
 
+// contains the value to be pushed and a state member
+struct PushDescr {
+    vec: Rc<Vector>,
+    value: usize,
+    pos: usize,
+    state: u8
+}
 
-
-
+struct PopDescr {
+    vec: Rc<Vector>,
+    pos: usize,
+    state: u8,
+}
 
 struct ShiftOp {
     vec: Rc<Vector>,
