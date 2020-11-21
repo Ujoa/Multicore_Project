@@ -234,64 +234,64 @@ impl WaitFreeVector {
     }
 
     // the an_ prefix means this method is to complete an op on the announcement table, not in a descriptor
-    // pub fn an_complete_push(&self, tid: usize, spot: &Atomic<usize>, expected: Shared<usize>, op: &PushOp, opptr: Shared<BaseOp>, guard: &Guard) -> bool {
-    //     // use WaitFreeVector;
+    pub fn an_complete_push(&self, tid: usize, spot: &Atomic<usize>, expected: Shared<usize>, op: &PushOp, opptr: Shared<BaseOp>, guard: &Guard) -> bool {
+        // use WaitFreeVector;
 
-    //     let shsize = self.size.load(SeqCst, guard);
-    //     let usizeptr = unsafe { shsize.deref() }.clone();
-    //     let mut pos = usizeptr.load(SeqCst);
+        let shsize = self.size.load(SeqCst, guard);
+        let usizeptr = unsafe { shsize.deref() }.clone();
+        let mut pos = usizeptr.load(SeqCst);
 
-    //     loop {
-    //         let doneptr = op.done.load(SeqCst, guard);
-    //         let done = unsafe { doneptr.deref() };
-    //         let rawdone = done.load(SeqCst);
+        loop {
+            let doneptr = op.done.load(SeqCst, guard);
+            let done = unsafe { doneptr.deref() };
+            let rawdone = done.load(SeqCst);
 
-    //         if rawdone {
-    //             break;
-    //         }
+            if rawdone {
+                break;
+            }
 
-    //         // let expected = spot.load(SeqCst, guard);
+            // let expected = spot.load(SeqCst, guard);
 
-    //         if let Some(x) = unpack_descr(expected, guard) {
-    //             let base = unsafe { x.deref() };
-    //             self.complete_base(spot, expected, base, guard);
-    //             continue;
-    //         }
+            if let Some(x) = unpack_descr(expected, guard) {
+                let base = unsafe { x.deref() };
+                self.complete_base(spot, expected, base, guard);
+                continue;
+            }
 
-    //         if expected.tag() != TagNotValue {
-    //             pos += 1;
-    //             continue;
-    //         }
+            if expected.tag() != TagNotValue {
+                pos += 1;
+                continue;
+            }
 
-    //         let pdescr = PushDescr::new(pos, op.value);
-    //         pdescr.owner.store(opptr, SeqCst);
-    //         let descr = BaseDescr::PushDescrType(pdescr);
+            let pdescr = PushDescr::new(pos, op.value);
+            pdescr.owner.store(opptr, SeqCst);
+            let descr = BaseDescr::PushDescrType(pdescr);
 
-    //         // let cdescr = descr.clone();
-    //         let descrptr = pack_descr(descr, guard);
+            // let cdescr = descr.clone();
+            let descrptr = pack_descr(descr, guard);
 
-    //         match spot.compare_and_set(expected, descrptr, SeqCst, guard) {
-    //             Ok(_) => {
-    //                 let completeres = self.complete_base(&spot, descrptr, &descr, guard);
+            match spot.compare_and_set(expected, descrptr, SeqCst, guard) {
+                Ok(_) => {
+                    let completeres = self.complete_base(&spot, descrptr, &descr, guard);
                     
-    //                 if completeres {
-    //                     op.result.load(SeqCst, guard);
-    //                     let res = resptr.
-    //                     usizeptr.fetch_add(1, SeqCst);
-    //                     return pos;
-    //                 }
-    //                 else {
-    //                     pos -= 1;
-    //                 }
-    //             },
-    //             Err(_) => (),
-    //         }
-    //     }
+                    if completeres {
+                        op.result.load(SeqCst, guard);
+                        let res = resptr.
+                        usizeptr.fetch_add(1, SeqCst);
+                        return pos;
+                    }
+                    else {
+                        pos -= 1;
+                    }
+                },
+                Err(_) => (),
+            }
+        }
 
-    //     return false;
+        return false;
 
         
-    // }
+    }
 
     pub fn at(&self, tid: usize, pos: usize) -> Option<usize> {
         let guard = &epoch::pin();
