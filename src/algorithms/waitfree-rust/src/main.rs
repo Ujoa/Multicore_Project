@@ -37,7 +37,11 @@ mod tests {
     fn seq_at(){
         let vec = WaitFreeVector::new(2);
         vec.push_back(0, 10);
+        vec.push_back(0, 20);
         vec.at(0, 0);
+
+        assert_eq!(vec.at(0, 0), Some(10));
+        assert_eq!(vec.at(0, 1), Some(20));
     }
 
     #[test]
@@ -46,10 +50,10 @@ mod tests {
         let num_threads = 8;
         let times = 12;
         assert!(num_threads*times < capacity);
-        
+
         let vec = Arc::new(WaitFreeVector::new(100));
         let mut handles = Vec::new();
-        
+
         for i in 0..num_threads {
 
             let vec_thread = vec.clone();
@@ -68,18 +72,52 @@ mod tests {
             handle.join().unwrap();
         }
         assert_eq!(vec.length(), num_threads * times);
-        }
+    }
 
     #[test]
-    fn threaded_resize(){
+    fn threaded_insert_and_check_all_are_some(){
+        let capacity = 5;
+        let num_threads = 4;
+        let times = 3;
+        // assert!(num_threads*times < capacity);
+
+        let vec = Arc::new(WaitFreeVector::new(capacity));
+        let mut handles = Vec::new();
+
+        for i in 0..num_threads {
+
+            let vec_thread = vec.clone();
+            handles.push(
+                thread::spawn(
+                    move || {
+                        for _ in 0..times {
+                            vec_thread.push_back(i, i*i);
+                        }
+                    }
+                )
+            );
+        }
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+        assert_eq!(vec.length(), num_threads * times);
+
+        for i in 0..num_threads * times {
+            assert!(vec.at(0, i).is_some());
+        }
+    }
+
+    #[test]
+    fn threaded_resize() {
         let capacity = 1;
         let num_threads = 4;
         let times = 5;
         assert!(num_threads*times > capacity);
-        
-        let vec = Arc::new(WaitFreeVector::new(100));
+
+        let vec = Arc::new(WaitFreeVector::new(capacity));
         let mut handles = Vec::new();
-        
+
         for i in 0..num_threads {
 
             let vec_thread = vec.clone();
@@ -99,7 +137,7 @@ mod tests {
         }
         println!("{}", vec.length());
         assert_eq!(vec.length(), num_threads * times);
-        }
+    }
 }
 
 
@@ -121,10 +159,10 @@ fn main(){
     let capacity = 10000;
     let num_threads = 16;
     let times = 400;
-    
+
     let vec = Arc::new(WaitFreeVector::new(num_threads+1));
     let mut handles = Vec::new();
-    
+
     for i in 0..num_threads {
 
         let vec_thread = vec.clone();

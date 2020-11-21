@@ -1,4 +1,4 @@
-use std::rc::Rc;
+Fixing push back and adding one more testuse std::rc::Rc;
 use std::sync::Arc;
 use crossbeam_epoch::{self as epoch, Atomic, Guard, Shared, Owned};
 use std::sync::atomic::Ordering::SeqCst;
@@ -23,6 +23,11 @@ const TagResize: usize = 4;
 
 const LIMIT: usize = usize::MAX;
 
+type Spot = Arc<Atomic<usize>>;
+
+fn make_spot(u: Shared<usize>) -> Spot {
+    return Arc::new(Atomic::from(u));
+}
 
 pub trait Vector {
     // API Methods
@@ -73,7 +78,7 @@ pub struct PushDescr {
 }
 
 impl PushDescr {
-    // vec: Atomic<WaitFreeVector>, 
+    // vec: Atomic<WaitFreeVector>,
     pub fn new(pos: usize, value: usize) -> PushDescr {
         PushDescr {
             // vec,
@@ -114,16 +119,16 @@ impl DescriptorTrait for PushDescr {
         //     spot.compare_and_set(vector.pack_descr(&self), self.value);
         // }
 
-        
 
-        
+
+
         true
     }
     fn value(&self) -> usize {
         todo!()
     }
 
-    
+
 }
 
 pub fn pack_descr(descr: BaseDescr, guard: &Guard) -> Shared<usize> {
@@ -134,7 +139,7 @@ pub fn pack_descr(descr: BaseDescr, guard: &Guard) -> Shared<usize> {
 
 pub fn unpack_descr<'g>(curr: Shared<usize>, guard: &'g Guard) -> Option<Shared<'g, BaseDescr>> {
     let unmasked: Shared<BaseDescr> = unsafe { std::mem::transmute(curr) };
-    
+
     if unmasked.tag() == TagDescr {
         Some(unmasked)
     }
@@ -181,7 +186,7 @@ impl WaitFreeVector {
         sizeusizeptr.load(SeqCst)
     }
 
-    pub fn get_spot(&self, position: usize, guard: &Guard) -> Atomic<usize> {
+    pub fn get_spot(&self, position: usize, guard: &Guard) -> Spot {
         let contigptr = self.storage.load(SeqCst, guard);
         let contig = unsafe { contigptr.deref() };
 
@@ -202,28 +207,28 @@ impl WaitFreeVector {
         let mut prefix = 0;
         if !old.is_null() {
             let old = unsafe {old.deref()};
-            prefix = old.capacity; 
+            prefix = old.capacity;
         }
 
         let new_capacity = prefix * 2 + 1;
 
-        let mut arr: Vec<Atomic<usize>> = Vec::with_capacity(new_capacity);
+        let mut arr: Vec<Spot> = Vec::with_capacity(new_capacity);
         for i in 0..new_capacity {
             if i < prefix {
                 let init: Shared<usize> = Shared::null().with_tag(TagNotCopied);
-                arr.push(Atomic::from(init));
+                arr.push(Arc::new(Atomic::from(init)));
             }
             else {
                 let init: Shared<usize> = Shared::null().with_tag(TagNotValue);
-                arr.push(Atomic::from(init));
+                arr.push(Arc::new(Atomic::from(init)));
             }
         }
 
         let old_atomic = self.storage.clone();
-        
+
         let v_new = Contiguous{
             old: old_atomic,
-            capacity: new_capacity, 
+            capacity: new_capacity,
             array: Atomic::new(arr),
         };
 
@@ -240,15 +245,15 @@ impl WaitFreeVector {
                 // println!("Resize {} ", new_capacity);
             },
             Err(_) => {
-                panic!("Resize Failed");
+                println!("Resize Failed");
             },
         }
 
 
 
     }
-    
-    pub fn complete_base(&self, spot: Atomic<usize>, old: Shared<usize>, descr: &BaseDescr, guard: &Guard) -> bool {
+
+    pub fn complete_base(&self, spot: Spot, old: Shared<usize>, descr: &BaseDescr, guard: &Guard) -> bool {
         // let cdescr = descr.clone();
         match descr {
             BaseDescr::PushDescrType(d) => self.complete_push(spot, old, d, guard),
@@ -256,7 +261,7 @@ impl WaitFreeVector {
         }
     }
 
-    
+
 
     pub fn at(&self, tid: usize, pos: usize) -> Option<usize> {
         let guard = &epoch::pin();
@@ -289,7 +294,7 @@ impl WaitFreeVector {
 
     pub fn push_back(&self, tid: usize, value: usize) -> usize {
         let guard = &epoch::pin();
-        
+
         // TODO: announcement table
 
         let shvalue = Owned::new(value).into_shared(guard);
@@ -297,7 +302,7 @@ impl WaitFreeVector {
         if shvalue.is_null() {
             panic!("CANNOT PUSH NULL POINTER");
         }
-        
+
         // Should be safe, user should never pass us a descriptor
         // let realvalue = unsafe { shvalue.deref() }.clone();
 
@@ -317,7 +322,7 @@ impl WaitFreeVector {
                             return 0;
                         },
                         Err(_) => {
-                            
+
                             pos += 1;
                             continue;
                         },
@@ -342,14 +347,13 @@ impl WaitFreeVector {
                 }
             }
             else {
-                dbg!(expectedptr);
+                // dbg!(expectedptr);
                 match unpack_descr(expectedptr, guard) {
                     Some(x) => {
                         let descr = unsafe { x.deref() }.clone();
                         self.complete_base(spot, expectedptr, &descr, guard);
                     }
                     None => {
-                        println!("&");
                         pos += 1;
                     }
                 }
@@ -357,13 +361,12 @@ impl WaitFreeVector {
             // let expected: usize = unsafe { spotptr.deref() }.clone();
         }
 
-        // TODO: add this op to annoucement table 
+        // TODO: add this op to annoucement table
 
         0
     }
 
-    pub fn complete_push(&self, spot: Atomic<usize>, old: Shared<usize>, descr: &PushDescr, guard: &Guard) -> bool {
-        // use WaitFreeVector;
+    pub fn complete_push(&self, spot: Spot, old: Shared<usize>, descr: &PushDescr, guard: &Guard) -> bool {
 
         let newdescr: PushDescr = descr.clone();
         // let mystate: Shared<u8> = newdescr.state.load(SeqCst, guard);
@@ -374,7 +377,7 @@ impl WaitFreeVector {
         // let rawstate: u8 = unsafe { mystate.deref() }.clone();
 
         let (mut mystate, mut rawstate) = loadstate(&newdescr, guard);
-        
+
         if newdescr.pos == 0 {
             if rawstate == STATE_UNDECIDED {
                 descr.state.compare_and_set(mystate, Owned::new(STATE_PASSED), SeqCst, guard);
@@ -382,13 +385,39 @@ impl WaitFreeVector {
 
             let basedescr = BaseDescr::PushDescrType(newdescr);
             let maskdescr = pack_descr(basedescr, guard);
-            
+
+            // NOTE: Do we need to check if this works or not?
             spot.compare_and_set(old, maskdescr, SeqCst, guard);
 
             return true;
         }
 
-        let spot2: Atomic<usize> = self.get_spot(newdescr.pos - 1, guard);
+
+        // let mut failures: usize = 0;
+
+        // let (spot2, current) = loop {
+        //     let spot2: Spot = self.get_spot(newdescr.pos - 1, guard);
+        //     let current: Shared<usize> = spot2.load(SeqCst, guard);
+
+        //     if rawstate == STATE_UNDECIDED {
+        //         match unpack_descr(current, guard) {
+        //             Some(shared_descr) => {
+        //                 if failures >= LIMIT {
+        //                     descr.state.compare_and_set(mystate, Owned::new(STATE_PASSED), SeqCst, guard);
+        //                 }
+        //                 failures += 1;
+        //                 let base_descr = unsafe { shared_descr.deref() };
+        //                 self.complete_base(spot2, current, base_descr, guard);
+        //             },
+        //             None => break (spot2, current),
+        //         }
+        //     } else {
+        //         break (spot2, current);
+        //     }
+        // };
+
+
+        let spot2: Spot = self.get_spot(newdescr.pos - 1, guard);
         let current: Shared<usize> = spot2.load(SeqCst, guard);
 
         let mut failures: usize = 0;
@@ -398,7 +427,7 @@ impl WaitFreeVector {
             mystate = temp.0;
             rawstate = temp.1;
 
-            let spot2: Atomic<usize> = self.get_spot(newdescr.pos - 1, guard);
+            let spot2: Spot = self.get_spot(newdescr.pos - 1, guard);
             let current: Shared<usize> = spot2.load(SeqCst, guard);
             let unpackres = unpack_descr(current, guard);
             match unpackres {
@@ -410,41 +439,34 @@ impl WaitFreeVector {
 
             failures += 1;
             if failures >= LIMIT {
-                descr.state.compare_and_set(mystate, Owned::new(STATE_PASSED), SeqCst, guard);
+                let set_to_passed = descr.state.compare_and_set(mystate, Owned::new(STATE_PASSED), SeqCst, guard);
+                if set_to_passed.is_err() {
+                    dbg!("Could not update the descriptor state to PASSED");
+                }
             }
 
             self.complete_base(spot2, current, &basedescr, guard);
-            
-            // Reset for next loop
-            // let mystate = newdescr.state.load(SeqCst, guard);
-            // if mystate.is_null() {
-            //     panic!("STATE OF A DESCRIPTOR WAS NULL IN complete_push")
-            // }
-            // let rawstate: u8 = unsafe { mystate.deref() }.clone();
-
-            
-
-            // let spot2: Atomic<usize> = self.get_spot(newdescr.pos - 1, guard);
-            // let current: Shared<usize> = spot2.load(SeqCst, guard);
         }
 
-        let temp = loadstate(&newdescr, guard);
-        mystate = temp.0;
-        rawstate = temp.1;
+        let (mystate, rawstate) = loadstate(&newdescr, guard);
 
         // Descriptor moved out of the way, but we still have to finish this push
         if rawstate == STATE_UNDECIDED {
             if current.tag() == TagNotValue {
-                descr.state.compare_and_set(mystate, Owned::new(STATE_FAILED), SeqCst, guard);
+                let set_to_failed = descr.state.compare_and_set(mystate, Owned::new(STATE_FAILED), SeqCst, guard);
+                if set_to_failed.is_err() {
+                    dbg!("Could not update the descriptor state to FAILED");
+                }
             }
             else {
-                descr.state.compare_and_set(mystate, Owned::new(STATE_PASSED), SeqCst, guard);
+                let set_to_passed = descr.state.compare_and_set(mystate, Owned::new(STATE_PASSED), SeqCst, guard);
+                if set_to_passed.is_err() {
+                    dbg!("Could not update the descriptor state to PASSED");
+                }
             }
         }
 
-        let temp = loadstate(&newdescr, guard);
-        mystate = temp.0;
-        rawstate = temp.1;
+        let (_, rawstate) = loadstate(&descr, guard);
 
         if rawstate == STATE_PASSED {
             spot.compare_and_set(old, Owned::new(newdescr.value), SeqCst, guard);
@@ -453,9 +475,7 @@ impl WaitFreeVector {
             spot.compare_and_set(old, Owned::new(0).with_tag(TagNotValue), SeqCst, guard);
         }
 
-        let temp = loadstate(&newdescr, guard);
-        mystate = temp.0;
-        rawstate = temp.1;
+        let (_, rawstate) = loadstate(&descr, guard);
 
         return rawstate == STATE_PASSED;
     }
@@ -478,25 +498,29 @@ struct Contiguous {
     old: Atomic<Contiguous>,
     capacity: usize,
     // array is a regular array of atomic pointers
-    array: Atomic<Vec<Atomic<usize>>>,
+    array: Atomic<Vec<Spot>>,
 }
 
 impl Contiguous {
     // pub fn new(vector: Atomic<WaitFreeVector>, capacity: usize) -> Contiguous {
     pub fn new(capacity: usize) -> Contiguous {
-        let init: Shared<usize> = Shared::null().with_tag(TagNotValue);
-        let arr: Atomic<Vec<Atomic<usize>>> = Atomic::new(vec![Atomic::from(init); capacity]);
+        let mut arr = Vec::new();
+
+        for failures in 0..capacity {
+            let init: Shared<usize> = Shared::null().with_tag(TagNotValue);
+            arr.push(make_spot(init));
+        }
 
         // Will use later for NotCopied
         // for i in 0..capacity {
-        //     arr[i] = 
+        //     arr[i] =
         // }
 
         Contiguous {
             // vector,
             old: Atomic::null(),
             capacity,
-            array: arr,
+            array: Atomic::new(arr),
         }
     }
 
@@ -514,20 +538,20 @@ impl Contiguous {
                     old.copy_value(position, guard);
                 }
             }
-            
+
         }
         // copy value
         // todo!();
     }
 
-    pub fn get_spot(&self, position: usize, guard: &Guard) -> Atomic<usize> {
+    pub fn get_spot(&self, position: usize, guard: &Guard) -> Spot {
         // if position >= self.capacity {
         //     // resize
         //     // dbg!(position);
         //     // dbg!(self.capacity);
         //     // todo!();
         // }
-        
+
         let vec = unsafe {self.array.load(SeqCst,guard).deref()};
         let spot = vec[position].load(SeqCst, guard);
 
