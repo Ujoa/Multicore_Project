@@ -268,29 +268,50 @@ impl WaitFreeVector {
             let descr = BaseDescr::PushDescrType(pdescr);
 
             // let cdescr = descr.clone();
-            let descrptr = pack_descr(descr, guard);
+            let descrptr = pack_descr(descr.clone(), guard);
 
             match spot.compare_and_set(expected, descrptr, SeqCst, guard) {
                 Ok(_) => {
                     let completeres = self.complete_base(&spot, descrptr, &descr, guard);
                     
                     if completeres {
-                        op.result.load(SeqCst, guard);
-                        let res = resptr.
+                        let resptr = op.result.load(SeqCst, guard);
+                        let res = unsafe { resptr.deref() };
+                        res.store(pos, SeqCst);
+
                         usizeptr.fetch_add(1, SeqCst);
-                        return pos;
+
+                        let dptr = op.done.load(SeqCst, guard);
+                        let done = unsafe { dptr.deref() };
+                        done.store(true, SeqCst);
+
+                        let retptr = op.can_return.load(SeqCst, guard);
+                        let ret = unsafe { retptr.deref() };
+                        ret.store(true, SeqCst);
                     }
                     else {
-                        pos -= 1;
+                        if pos == 0 {
+                            pos += 1;
+                        }
+                        else {
+                            pos -= 1;
+                        }
                     }
                 },
                 Err(_) => (),
             }
         }
 
-        return false;
+        loop {
+            let retptr = op.can_return.load(SeqCst, guard);
+            let ret = unsafe { retptr.deref() };
+            if ret.load(SeqCst) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(3));
+        }
 
-        
+        true
     }
 
     pub fn at(&self, tid: usize, pos: usize) -> Option<usize> {
