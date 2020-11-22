@@ -38,13 +38,13 @@ fn test_pushback(num_threads: i32){
     }
 }
 
-fn test_popback(num_threads: i32){
+fn test_popback(num_threads: usize){
     let len = 30;
     let size = (num_threads as usize) * len;
     println!("TEST POPBACK {} threads", num_threads);
 
     let v = Arc::new(WaitFreeVector::new(size));
-    let good: Arc<WaitFreeVector> = Arc::new(WaitFreeVector::new(num_threads as usize));
+    // let good: Arc<WaitFreeVector> = Arc::new(WaitFreeVector::new(num_threads as usize));
     let mut threads = Vec::new();
 
     for i in 0..size{
@@ -52,36 +52,30 @@ fn test_popback(num_threads: i32){
     }
 
     for i in 0..num_threads{
-        let good_thread = good.clone();
         let v_thread  = v.clone();
 
-        // Needed for fix where vec is uninitialized
-        good.push_back(0,0);
         
         threads.push(
                 thread::spawn( move || {
+                    let mut res = 0;
                     for _ in 0..len{
-                        todo!("Implement pop_back test");
                         // let val = v_thread.pop_back().unwrap();
-                        // good_thread.insertat(val, i as usize);
+                        let val = 69;
+                        res += val;
                     }
-
+                    return res;
                 }
             )
         );
     }
 
     for t in threads {
-        t.join().unwrap();
+        let res = t.join().unwrap();
+        println!("{}", res );
     }
 
     for i in 0..v.length(){
         println!("{}", v.at(0,i).unwrap());
-    }
-
-    println!("{}", good.length());
-    for i in 0..num_threads {
-        println!("{}", good.at(0, i as usize).unwrap());
     }
 
     println!("/n");
@@ -196,7 +190,7 @@ fn test_all(max_num_threads: usize){
                         move || {
                             let mut rng = rand::thread_rng();
                             let mut r = || -> usize {
-                                rng.gen_range(0, i)
+                                rng.gen()
                             };
 
                             //TODO: Check why None value
@@ -210,19 +204,22 @@ fn test_all(max_num_threads: usize){
 
                                 let x = r();
                                 let size = thread_v.length();
+
                                 if do_pushack {
                                     thread_v.push_back(i, x);
                                 } else {
                                     if cur_op == 0 && size > 0 {
-                                        todo!("Implement inserat");
                                         // thread_v.insertat(r() % size, x);
                                     } else if cur_op == 1 && size > 0 {
                                         thread_v.at(i, r() % size);
                                     } else if cur_op == 2 && size > 0 {
                                         let pos = r() % size;
-                                        let old = thread_v.at(i, pos).unwrap();
-                                        todo!("Implement CWrite");
-                                        // thread_v.cwrite(pos, old, x);
+                                        match thread_v.at(i, pos) {
+                                            Some(_) => {
+                                                // thread_v.cwrite(pos, old, x);
+                                            },
+                                            None => {},
+                                        };
                                     }
                                 }
                             }
@@ -236,7 +233,7 @@ fn test_all(max_num_threads: usize){
                             move || {
                                 let mut rng = rand::thread_rng();
                                 let mut r = || -> usize {
-                                    rng.gen_range(0, i)
+                                    rng.gen()
                                 };
                                 //let tot_ops = thread_ops_per_thread.at(i).unwrap();
 
@@ -260,9 +257,12 @@ fn test_all(max_num_threads: usize){
                                             thread_v.at(i, r()%size);
                                         } else if cur_op == 2 && size > 0 {
                                             let pos = r () % size;
-                                            let old = thread_v.at(i, pos).unwrap();
-                                            todo!("Implement CWrite");
-                                            // thread_v.cwrite(pos, old, x);
+                                            match thread_v.at(i, pos) {
+                                                Some(_) => {
+                                                    // thread_v.cwrite(pos, old, x);
+                                                },
+                                                None => {},
+                                            };
                                         }
                                     }
 
