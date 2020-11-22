@@ -471,8 +471,8 @@ mod tests {
 
 fn main() {
     let num: usize = 3;
-    // test_all(num);
+    test_all(num);
     // test_cwrite(num);
     // test_pushback(num);
-    // test_popback(num);
+    test_popback(num);
 }
