@@ -167,7 +167,7 @@ pub fn value_base(descr: BaseDescr) -> Option<usize> {
 }
 
 pub struct WaitFreeVector {
-    storage: Atomic<Contiguous>,
+    pub storage: Atomic<Contiguous>,
     size: Atomic<AtomicUsize>,
 }
 
@@ -200,7 +200,7 @@ impl WaitFreeVector {
     }
 
     pub fn resize(&self){
-
+        println!("Resizing");
         let guard = &epoch::pin();
         let old = self.storage.load(SeqCst, guard);
 
@@ -313,7 +313,9 @@ impl WaitFreeVector {
         for failures in 0..=LIMIT {
             let spot = self.get_spot(pos, guard);
             let expectedptr = spot.load(SeqCst, guard);
-            if expectedptr.tag() == TagNotValue || expectedptr.tag() == TagNotCopied{
+            if expectedptr.tag() == TagNotValue 
+            // || expectedptr.tag() == TagNotCopied 
+            {
                 if pos == 0 {
                     let res = spot.compare_and_set(expectedptr, shvalue, SeqCst, guard);
                     match res {
@@ -493,12 +495,12 @@ impl WaitFreeVector {
 //     //fn announce_op(&self, _: (dyn Descriptor + 'static)) { todo!() }
 // }
 
-struct Contiguous {
+pub struct Contiguous {
     // vector: Atomic<WaitFreeVector>,
-    old: Atomic<Contiguous>,
-    capacity: usize,
+    pub old: Atomic<Contiguous>,
+    pub capacity: usize,
     // array is a regular array of atomic pointers
-    array: Atomic<Vec<Spot>>,
+    pub array: Atomic<Vec<Spot>>,
 }
 
 impl Contiguous {
@@ -528,20 +530,32 @@ impl Contiguous {
 
 
     pub fn copy_value(&self, position: usize, guard: &Guard) {
+        // Load the old Contiguous structure to copy from
         let oldptr = self.old.load(SeqCst, guard);
-        if !oldptr.is_null(){
-            let old = unsafe { oldptr.deref() }.clone();
-            let load_vec = unsafe {old.array.load(SeqCst, guard).deref()};
-            if position < load_vec.len(){
-                let val = load_vec[position].load(SeqCst, guard);
-                if val.tag() == TagNotCopied {
-                    old.copy_value(position, guard);
-                }
+        assert!(!oldptr.is_null(), "If we're in copy_value, our pointer to the old vector must exist");
+
+        // Deref and get the old vector
+        let old = unsafe { oldptr.deref() };
+        let load_vec = unsafe { old.array.load(SeqCst, guard).deref() };
+
+        if position < load_vec.len() {
+            let val = load_vec[position].load(SeqCst, guard);
+            if val.tag() == TagNotCopied {
+                old.copy_value(position, guard);
             }
 
+            // Copying over the value from the old vector into our current vector
+            let our_vector = unsafe { self.array.load(SeqCst, guard).deref() };
+            let current_spot = our_vector[position].clone();
+            
+            let expected_value = Shared::<usize>::null().with_tag(TagNotCopied); 
+
+            let reloaded_old_value = load_vec[position].load(SeqCst, guard);
+            let updated_our_vector = current_spot.compare_and_set(expected_value, reloaded_old_value, SeqCst, guard);
+            if updated_our_vector.is_err() {
+                println!("Couldn't overwrite the spot in our vector");
+            }
         }
-        // copy value
-        // todo!();
     }
 
     pub fn get_spot(&self, position: usize, guard: &Guard) -> Spot {

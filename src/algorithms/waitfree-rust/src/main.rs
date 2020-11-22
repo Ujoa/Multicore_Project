@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::thread;
 use rand::Rng;
 use std::time::{Instant, Duration};
-
+use std::sync::atomic::Ordering::SeqCst;
 
 #[cfg(test)]
 mod tests {
@@ -42,6 +42,24 @@ mod tests {
 
         assert_eq!(vec.at(0, 0), Some(10));
         assert_eq!(vec.at(0, 1), Some(20));
+    }
+
+    #[test]
+    fn seq_resize_at() {
+        // There should be 2 resizes happening here.
+        let vec = WaitFreeVector::new(1);
+
+        vec.push_back(0, 10);
+        vec.push_back(0, 20);
+        vec.push_back(0, 30);
+        vec.push_back(0, 40);
+
+        assert_eq!(vec.at(0, 0), Some(10));
+        assert_eq!(vec.at(0, 1), Some(20));
+        assert_eq!(vec.at(0, 2), Some(30));
+        assert_eq!(vec.at(0, 3), Some(40));
+
+        assert_eq!(vec.length(), 4)
     }
 
     #[test]
