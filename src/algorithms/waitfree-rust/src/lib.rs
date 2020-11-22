@@ -32,6 +32,7 @@ trait DescriptorTrait {
 pub enum BaseDescr {
     PushDescrType(PushDescr),
     PopDescrType(PopDescr),
+    PopSubDescrType(PopSubDescr),
 }
 
 // contains the value to be pushed and a state member
@@ -80,10 +81,10 @@ pub fn loadstate<'g>(newdescr: &PushDescr, guard: &'g Guard) -> (Shared<'g, u8>,
     (mystate, rawstate)
 }
 
-// returns None if the value is NotValue
 pub fn value_base(descr: BaseDescr) -> Option<usize> {
     match descr {
         BaseDescr::PushDescrType(d) => Some(d.value),
+        BaseDescr::PopSubDescrType(d) => Some(d.value),
         _ => None,
     }
 }
@@ -179,6 +180,7 @@ impl WaitFreeVector {
         // let cdescr = descr.clone();
         match descr {
             BaseDescr::PushDescrType(d) => self.complete_push(spot, old, d, guard),
+            BaseDescr::PopSubDescrType(d) => self.complete_pop_sub(spot, old, d, guard),
             _ => false,
         }
     }
@@ -369,6 +371,31 @@ impl WaitFreeVector {
 
         return rawstate == STATE_PASSED;
     }
+
+    pub fn complete_pop_sub(&self, spot: Spot, old: Shared<usize>, descr: &PopSubDescr, guard: &Guard) -> bool {
+        let cloned = descr.clone();
+    
+        let owned_descr = Owned::new(cloned).into_shared(guard);
+    
+        let cas_result = descr.parent.child
+            .compare_and_set(Shared::<PopSubDescr>::null(), owned_descr, SeqCst, guard);
+    
+        if let Err(e) = cas_result {
+            println!("The inserting the pop sub desc failed {:?}", e);
+        }
+    
+        let result = if descr.parent.child.load(SeqCst, guard) == owned_descr {
+            spot.compare_and_set(old, Owned::new(0).with_tag(TagNotValue), SeqCst, guard)
+        } else {
+            spot.compare_and_set(old, Owned::new(descr.value), SeqCst, guard)
+        };
+    
+        if let Err(e) = result {
+            println!("Something went wrong {:?}", e)
+        }
+    
+        descr.parent.child.load(SeqCst, guard) == owned_descr
+    }
 }
 
 struct Contiguous {
@@ -452,7 +479,8 @@ pub struct PopDescr {
 
 // PopSubDescr consists of a reference to a previously placed PopDescr (parent)
 // and the value that was replaced by the PopSubDescr (value).
-struct PopSubDescr {
+#[derive(Clone)]
+pub struct PopSubDescr {
     parent: Rc<PopDescr>,
     value: usize,
 }
