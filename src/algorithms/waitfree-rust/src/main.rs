@@ -68,7 +68,7 @@ mod tests {
         let num_threads = 8;
         let times = 12;
         assert!(num_threads*times < capacity);
-        
+
         let vec = Arc::new(WaitFreeVector::new(100, num_threads));
         let mut handles = Vec::new();
 
