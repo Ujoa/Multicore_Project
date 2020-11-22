@@ -396,17 +396,18 @@ impl WaitFreeVector {
             let expectedptr = spot.load(SeqCst, guard);
             if expectedptr.tag() == TagNotValue {
                 
-                let descr = BaseDescr::PopDescrType(PopDescr::new(self, pos));
-                let cdescr = descr.clone();
+                let descr = BaseDescr::PopDescrType(PopDescr::new(pos));
+                // let cdescr = descr.clone();
                 let descrptr = pack_descr(descr, guard);
     
                 match spot.compare_and_set(expectedptr, descrptr, SeqCst, guard) {
                     Ok(_) => {
-                        let res = self.complete_base(spot, descrptr, &cdescr, guard);
+                        let res = self.complete_base(spot, descrptr, &descr, guard);
                         if res {
-                            let newdescr: PopDescr = descr.clone();
-                            let child = newdescr.child;
-                            let mut value = child.load(SeqCst);
+                            // let newdescr: PopDescr = descr.clone();
+                            // let child = descr.child;
+                            
+                            let mut value = &descr.child.load(SeqCst);
                             
                             sizeusizeptr.fetch_add(-1, SeqCst);
                             return Some(value);
@@ -577,9 +578,8 @@ impl Contiguous {
 // PopDescr consists solely of a reference to a PopSubDescr (child) which is initially Null.
 #[derive(Clone)]
 pub struct PopDescr {
-    vec: Atomic<WaitFreeVector>,
     pos: usize,
-    child: Atomic<PopSubDescr>
+    child: Atomic<PopSubDescr>,
 }
 
 impl PopDescr {
@@ -588,17 +588,17 @@ impl PopDescr {
         PopDescr {
             // vec,
             pos,
-            child,
+            child: Atomic::null(),
         }
     }
 }
 
 // PopSubDescr consists of a reference to a previously placed PopDescr (parent)
 // and the value that was replaced by the PopSubDescr (value).
-// struct PopSubDescr {
-//     parent: Rc<PopDescr>,
-//     value: usize,
-// }
+struct PopSubDescr {
+    parent: Rc<PopDescr>,
+    value: usize,
+}
 
 // struct PopDescr {
 //     vec: Rc<Vector>,
