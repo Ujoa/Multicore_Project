@@ -11,7 +11,7 @@ const TagResize: usize = 4;
 
 const NO_RESULT: usize = usize::MAX;
 
-const LIMIT: usize = usize::MAX;
+const LIMIT: usize = 1000;
 
 type Spot = Arc<Atomic<usize>>;
 
@@ -167,7 +167,7 @@ impl WaitFreeVector {
 
     pub fn help_if_needed(&self, tid: usize) {
         if tid >= self.num_threads {
-            panic!("tid {} is out of bounds", tid);
+            panic!("tid {} out of bounds for {} threads", tid, self.num_threads);
         }
 
         let help = self.thread_to_help[tid].load(Acquire);
@@ -381,16 +381,16 @@ impl WaitFreeVector {
         None
     }
 
-    pub fn push_back(&self, tid: usize, value: usize) -> usize {
+    pub fn push_back(&self, tid: usize, value: usize) {
+        self.help_if_needed(tid);
+        
         let guard = &epoch::pin();
-
-        // TODO: announcement table
 
         let shvalue = Owned::new(value).into_shared(guard);
 
-        if shvalue.is_null() {
-            panic!("CANNOT PUSH NULL POINTER");
-        }
+        // if shvalue.is_null() {
+        //     panic!("CANNOT PUSH NULL POINTER");
+        // }
 
         let shsize = self.size.load(SeqCst, guard);
         let sizeusizeptr = unsafe { shsize.deref() }.clone();
@@ -407,7 +407,7 @@ impl WaitFreeVector {
                     match res {
                         Ok(_) => {
                             sizeusizeptr.fetch_add(1, SeqCst);
-                            return 0;
+                            return;
                         },
                         Err(_) => {
 
@@ -425,7 +425,7 @@ impl WaitFreeVector {
                     Ok(_) => {
                         if self.complete_base(spot, descrptr, &cdescr, guard) {
                             sizeusizeptr.fetch_add(1, SeqCst);
-                            return pos;
+                            return;
                         }
                         else {
                             pos -= 1;
@@ -449,9 +449,25 @@ impl WaitFreeVector {
             // let expected: usize = unsafe { spotptr.deref() }.clone();
         }
 
-        // TODO: add this op to annoucement table
+        let op: Shared<BaseOp> = Owned::new(BaseOp::PushOpType(PushOp::new(value))).into_shared(guard);
 
-        0
+        self.announce_op(tid, op.clone(), guard);
+    }
+
+    pub fn announce_op(&self, tid: usize, op: Shared<BaseOp>, guard: &Guard) {
+        if tid >= self.num_threads {
+            panic!("tid {} out of bounds for {} threads", tid, self.num_threads);
+        }
+
+        let cur = self.thread_ops[tid].load(SeqCst, guard);
+
+        if !cur.is_null() {
+            println!("replacing existing op in annoucement table");
+        }
+
+        self.thread_ops[tid].compare_and_set(cur, op, SeqCst, guard);
+
+        self.help(tid, tid);
     }
 
     pub fn complete_push(&self, spot: Spot, old: Shared<usize>, descr: &PushDescr, guard: &Guard) -> bool {
