@@ -95,17 +95,20 @@ pub fn value_base(descr: BaseDescr) -> Option<usize> {
     }
 }
 
+#[derive(Clone)]
 pub enum BaseOp {
     PushOpType(PushOp),
-    PopOpType(PopOp),
+    PopOpType(Arc<PopOp>),
 }
 
+#[derive(Clone)]
 pub struct PushOp {
     done: Atomic<AtomicBool>,
     value: usize,
     result: Atomic<AtomicUsize>,
     can_return: Atomic<AtomicBool>,
 }
+
 impl PushOp {
     pub fn new(value: usize) -> PushOp {
         PushOp {
@@ -117,8 +120,19 @@ impl PushOp {
     }
 }
 
+#[derive(Clone)]
 pub struct PopOp {
+    done: Atomic<bool>,
+    result: Atomic<Option<usize>>,
+}
 
+impl PopOp {
+    pub fn new() -> PopOp {
+        PopOp {
+            done: Atomic::new(false),
+            result: Atomic::null(),
+        }
+    }
 }
 
 pub struct WaitFreeVector {
@@ -268,7 +282,7 @@ impl WaitFreeVector {
         let op: &BaseOp = unsafe { opptr.deref() };        
         match op {
             BaseOp::PushOpType(o) => self.an_complete_push(tid, o, opptr, guard),
-            _ => false,
+            BaseOp::PopOpType(o) => self.an_complete_pop(tid, o, opptr, guard),
         }
     }
 
@@ -305,7 +319,7 @@ impl WaitFreeVector {
 
             let pdescr = PushDescr::new(pos, op.value);
             pdescr.owner.store(opptr, SeqCst);
-            let descr = BaseDescr::PushDescrType(pdescr);
+            let descr = BaseDescr::PushDescrType(Rc::new(pdescr));
             let descrptr = pack_descr(descr.clone(), guard);
 
             if let Ok(_) = spot.compare_and_set(expected, descrptr, SeqCst, guard) {
@@ -346,6 +360,66 @@ impl WaitFreeVector {
             }
             std::thread::sleep(std::time::Duration::from_millis(3));
         }
+
+        true
+    }
+
+    fn get_pos(&self, guard: &Guard) -> usize {
+        let shsize = self.size.load(SeqCst, guard);
+        let usizeptr = unsafe { shsize.deref() }.clone();
+        usizeptr.load(SeqCst)
+    }
+
+    pub fn an_complete_pop(&self, tid: usize, op: &PopOp, op_ptr: Shared<BaseOp>, guard: &Guard) -> bool {
+        while op.result.load(SeqCst, guard).is_null() {
+            let mut pos = self.get_pos(guard);
+
+            if pos == 0 {
+                op.result.store(Owned::new(None), SeqCst);
+                continue;
+            }
+
+            let spot = self.get_spot(pos, guard);
+            let expected = spot.load(SeqCst, guard);
+
+            if let Some(base_descr) = unpack_descr(expected, guard) {
+                let descr = unsafe { base_descr.deref() };
+                self.complete_base(spot, expected, descr, guard);
+                continue;
+            }
+
+            if expected.tag() != TagNotValue {
+                pos += 1;
+                continue;
+            }
+
+            let pop_descr = Rc::new(PopDescr::new(pos));
+            let cloned = pop_descr.clone();
+            pop_descr.owner.store(op_ptr, SeqCst);
+
+
+            let packed_descr = pack_descr(BaseDescr::PopDescrType(pop_descr), guard);
+            if let Ok(old) = spot.compare_and_set(expected, packed_descr, SeqCst, guard) {
+                let descr = unsafe { unpack_descr(old, guard).expect("This should exist").deref() };
+                let res = self.complete_base(spot, old, descr, guard);
+                
+                if res {
+                    let child = unsafe { cloned.child.load(SeqCst, guard).deref() };
+                    let new_result = Owned::new(Some(child.value.clone()));
+                    let set_value = op.result.compare_and_set(Shared::null(), new_result, SeqCst, guard);
+                    
+                    assert!(set_value.is_ok());
+
+                    let usizeptr = unsafe { self.size.load(SeqCst, guard).deref() };
+
+                    usizeptr.fetch_sub(1, SeqCst);
+                } else {
+                    pos -= 1;
+                }
+            }
+        }
+
+        assert!(!op.result.load(SeqCst, guard).is_null());
 
         true
     }
@@ -552,6 +626,8 @@ impl WaitFreeVector {
     }
 
     pub fn pop_back(&self, tid: usize) -> Option<usize> {
+        self.help_if_needed(tid);
+
         let guard = &epoch::pin();
         
         // TODO: announcement table
@@ -608,7 +684,11 @@ impl WaitFreeVector {
             // announcement table stuff
         }
 
-        None
+        let pop_op = Arc::new(PopOp::new());
+        let base_op = BaseOp::PopOpType(pop_op.clone());
+        self.announce_op(tid, Owned::new(base_op).into_shared(guard), guard);
+
+        unsafe { pop_op.result.load(SeqCst, guard).deref() }.clone()
     }
 
     pub fn complete_pop(&self, spot: Spot, old: Shared<usize>, pop_descriptor: Rc<PopDescr>, guard: &Guard) -> bool {
@@ -773,15 +853,15 @@ impl Contiguous {
 pub struct PopDescr {
     pos: usize,
     child: Atomic<PopSubDescr>,
+    owner: Atomic<BaseOp>,
 }
 
 impl PopDescr {
-    // vec: Atomic<WaitFreeVector>, 
     pub fn new(pos: usize) -> PopDescr {
         PopDescr {
-            // vec,
-            pos,
+            pos: pos,
             child: Atomic::null(),
+            owner: Atomic::null(),
         }
     }
 }

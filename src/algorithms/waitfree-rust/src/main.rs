@@ -159,7 +159,7 @@ mod tests {
 
     #[test]
     fn pop_back() {
-        let vec = WaitFreeVector::new(2);
+        let vec = WaitFreeVector::new(2, 1);
         vec.push_back(0, 10);
         vec.push_back(0, 20);
         vec.at(0, 0);
