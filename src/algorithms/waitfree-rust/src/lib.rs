@@ -11,7 +11,7 @@ const TagResize: usize = 4;
 
 const NO_RESULT: usize = usize::MAX;
 
-const LIMIT: usize = 1000000;
+const LIMIT: usize = 1000;
 
 type Spot = Arc<Atomic<usize>>;
 
