@@ -65,17 +65,6 @@ pub fn unpack_descr<'g>(curr: Shared<usize>, guard: &'g Guard) -> Option<Shared<
     }
 }
 
-pub fn is_descr(curr: Shared<usize>, guard: &Guard) -> bool {
-    let unmasked: Shared<BaseDescr> = unsafe { std::mem::transmute(curr) };
-    
-    if unmasked.tag() == TagDescr && unmasked.tag() != TagDescr {
-        return true;
-    }
-    else {
-        return false;
-    }
-}
-
 pub fn loadstate<'g>(newdescr: &PushDescr, guard: &'g Guard) -> (Shared<'g, u8>, u8) {
     let mystate = newdescr.state.load(SeqCst, guard);
     if mystate.is_null() {
