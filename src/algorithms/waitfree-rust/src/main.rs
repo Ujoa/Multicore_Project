@@ -156,6 +156,23 @@ mod tests {
         println!("{}", vec.length());
         assert_eq!(vec.length(), num_threads * times);
     }
+
+    #[test]
+    fn pop_back() {
+        let vec = WaitFreeVector::new(2);
+        vec.push_back(0, 10);
+        vec.push_back(0, 20);
+        vec.at(0, 0);
+
+        assert_eq!(vec.at(0, 0), Some(10));
+        assert_eq!(vec.at(0, 1), Some(20));
+
+        assert_eq!(vec.pop_back(0), Some(20));
+        assert_eq!(vec.pop_back(0), Some(10));
+        assert_eq!(vec.pop_back(0), None);
+
+        assert_eq!(vec.length(), 0);
+    }
 }
 
 

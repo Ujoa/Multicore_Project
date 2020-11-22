@@ -24,9 +24,9 @@ const STATE_PASSED: u8 = 0x02;
 
 #[derive(Clone)]
 pub enum BaseDescr {
-    PushDescrType(PushDescr),
-    PopDescrType(PopDescr),
-    PopSubDescrType(PopSubDescr),
+    PushDescrType(Rc<PushDescr>),
+    PopDescrType(Rc<PopDescr>),
+    PopSubDescrType(Rc<PopSubDescr>),
 }
 
 // contains the value to be pushed and a state member
@@ -65,10 +65,10 @@ pub fn unpack_descr<'g>(curr: Shared<usize>, guard: &'g Guard) -> Option<Shared<
     }
 }
 
-pub fn is_descr(curr: Shared<usize>, guard: &'g Guard) -> bool {
+pub fn is_descr(curr: Shared<usize>, guard: &Guard) -> bool {
     let unmasked: Shared<BaseDescr> = unsafe { std::mem::transmute(curr) };
     
-    if unmasked.tag() == TagDescr && unmasked != TagDescr {
+    if unmasked.tag() == TagDescr && unmasked.tag() != TagDescr {
         return true;
     }
     else {
@@ -89,7 +89,7 @@ pub fn loadstate<'g>(newdescr: &PushDescr, guard: &'g Guard) -> (Shared<'g, u8>,
 pub fn value_base(descr: BaseDescr) -> Option<usize> {
     match descr {
         BaseDescr::PushDescrType(d) => Some(d.value),
-        BaseDescr::PopDescrType(d) => Some(d.value),
+        BaseDescr::PopDescrType(d) => None, // NOTE: C++ Version returns a NotValue instead
         BaseDescr::PopSubDescrType(d) => Some(d.value),
         _ => None,
     }
@@ -185,9 +185,9 @@ impl WaitFreeVector {
     pub fn complete_base(&self, spot: Spot, old: Shared<usize>, descr: &BaseDescr, guard: &Guard) -> bool {
         // let cdescr = descr.clone();
         match descr {
-            BaseDescr::PushDescrType(d) => self.complete_push(spot, old, d, guard),
-            BaseDescr::PopDescrType(d) => self.complete_pop(spot, old, d, guard),
-            BaseDescr::PopSubDescrType(d) => self.complete_pop_sub(spot, old, d, guard),
+            BaseDescr::PushDescrType(d) => self.complete_push(spot, old, d.clone(), guard),
+            BaseDescr::PopDescrType(d) => self.complete_pop(spot, old, d.clone(), guard),
+            BaseDescr::PopSubDescrType(d) => self.complete_pop_sub(spot, old, d.clone(), guard),
             _ => false,
         }
     }
@@ -259,7 +259,7 @@ impl WaitFreeVector {
                     }
                 }
 
-                let descr = BaseDescr::PushDescrType(PushDescr::new(pos, value));
+                let descr = BaseDescr::PushDescrType(Rc::new(PushDescr::new(pos, value)));
                 let cdescr = descr.clone();
                 let descrptr = pack_descr(descr, guard);
 
@@ -296,9 +296,9 @@ impl WaitFreeVector {
         0
     }
 
-    pub fn complete_push(&self, spot: Spot, old: Shared<usize>, descr: &PushDescr, guard: &Guard) -> bool {
+    pub fn complete_push(&self, spot: Spot, old: Shared<usize>, descr: Rc<PushDescr>, guard: &Guard) -> bool {
 
-        let newdescr: PushDescr = descr.clone();
+        let newdescr = descr.clone();
 
         let (mut mystate, mut rawstate) = loadstate(&newdescr, guard);
 
@@ -379,7 +379,7 @@ impl WaitFreeVector {
         return rawstate == STATE_PASSED;
     }
 
-    pub fn pop_back(&self, tid: usize) -> Option<Atomic<usize>> {
+    pub fn pop_back(&self, tid: usize) -> Option<usize> {
         let guard = &epoch::pin();
         
         // TODO: announcement table
@@ -397,21 +397,21 @@ impl WaitFreeVector {
             let expectedptr = spot.load(SeqCst, guard);
             if expectedptr.tag() == TagNotValue {
                 
-                let descr = BaseDescr::PopDescrType(PopDescr::new(pos));
-                // let cdescr = descr.clone();
+                let descr = BaseDescr::PopDescrType(Rc::new(PopDescr::new(pos)));
+                let cdescr = descr.clone();
                 let descrptr = pack_descr(descr, guard);
     
                 match spot.compare_and_set(expectedptr, descrptr, SeqCst, guard) {
-                    Ok(_) => {
-                        let res = self.complete_base(spot, descrptr, &descr, guard);
+                    Ok(new_descriptor) => {
+                        let res = self.complete_base(spot, descrptr, &cdescr, guard);
                         if res {
-                            // let newdescr: PopDescr = descr.clone();
-                            // let child = descr.child;
-                            
-                            let mut value = &descr.child.load(SeqCst);
-                            
-                            sizeusizeptr.fetch_add(-1, SeqCst);
-                            return Some(value);
+                            if let BaseDescr::PopDescrType(p) = cdescr {
+                                let child = unsafe { p.child.load(SeqCst, guard).deref() };
+    
+                                sizeusizeptr.fetch_sub(1, SeqCst);
+                                return Some(child.value);
+                            }
+                            return None
                         }
                         else {
                             pos -= 1;
@@ -438,82 +438,78 @@ impl WaitFreeVector {
 
         None
     }
+
+    pub fn complete_pop(&self, spot: Spot, old: Shared<usize>, pop_descriptor: Rc<PopDescr>, guard: &Guard) -> bool {
+
+        let previous_spot = self.get_spot(pop_descriptor.pos - 1, guard);
+        let mut failures = 0;
         
-    pub fn complete_pop(&self, spot: Atomic<usize>, old: Shared<usize>, descr: &PopDescr, guard: &Guard) -> bool {
-    
-        let newdescr = descr.clone();
+        loop {
+            if !pop_descriptor.child.load(SeqCst, guard).is_null() {
+                break
+            }
 
-        let vectorptr = self.vec.load(SeqCst, guard);
-        let vector = unsafe { vectorptr.deref() };
-        let spot = vector.get_spot(self.pos, guard);
+            if failures >= LIMIT {
+                let failed_child = PopSubDescr::with_state_and_parent(STATE_FAILED, pop_descriptor.clone());
+                let failed_child_owned = Owned::new(failed_child);
+                pop_descriptor.child.compare_and_set(Shared::null(), failed_child_owned, SeqCst, guard);
 
-        let child = self.child;
-        let mut value = child.load(SeqCst, guard);
-        let mut failures: usize = 0;
-
-        let (mut mystate, mut rawstate) = loadstate(&newdescr, guard);
-
-        while !value {
-            let temp = loadstate(&newdescr, guard);
-            mystate = temp.0;
-            rawstate = temp.1;
+                break
+            }
 
             failures += 1;
-            if failures >= LIMIT {
-                child.compare_and_set(mystate, Owned::new(STATE_FAILED), SeqCst, guard);
-                break;
-            }
 
-            let spot: Atomic<usize> = self.get_spot(newdescr.pos - 1, guard);
-            let expected: Shared<usize> = spot.load(SeqCst, guard);
-            let unpackres = unpack_descr(expected, guard);
-            match unpackres {
-                None => break,
-                _ => (),
-            }
-            let baseptr = unpackres.unwrap();
-            let basedescr = unsafe { baseptr.deref() }.clone();
-
+            let expected = previous_spot.load(SeqCst, guard);
             if expected.tag() == TagNotValue {
-                child.compare_and_set(mystate, Owned::new(STATE_FAILED), SeqCst, guard);
+                let failed_child = PopSubDescr::with_state_and_parent(STATE_FAILED, pop_descriptor.clone());
+                let failed_child_owned = Owned::new(failed_child);
+                pop_descriptor.child.compare_and_set(Shared::null(), failed_child_owned, SeqCst, guard);
             }
-            else if vector.is_descr(expected) { 
-                self.complete_base(spot, expected, &basedescr, guard);
-            }
-            else {
-                let popsubdescr = BaseDescr::PopSubDescrType(PopSubDescr::new(self, expected));
-                let packed = vector.pack_descr(popsubdescr);
+            
+            match unpack_descr(expected, guard) {
+                Some(descriptor) => {
+                    let descr = unsafe { descriptor.deref() };
+                    self.complete_base(previous_spot.clone(), expected, descr, guard);
+                },
+                None => {
+                    let raw_value = unsafe { expected.deref() }.clone();
+                    let raw_sub = PopSubDescr::new(pop_descriptor.clone(), raw_value);
+                    
+                    let pop_sub_desc = Rc::new(raw_sub);
+                    let base_descr = BaseDescr::PopSubDescrType(pop_sub_desc);
+                    let packed = pack_descr(base_descr, guard);
 
-                if spot.compare_and_set(expected, packed, SeqCst, guard) {
-                    let psh_type = Some(popsubdescr);
+                    let previous_spot_replacement = previous_spot.compare_and_set(expected, packed, SeqCst, guard);
 
-                    if psh_type {
-                        child.compare_and_set(mystate, popsubdescr, SeqCst, guard);
-                    } 
-                    if value == popsubdescr {
-                        spot.compare_and_set(packed, NotValue, SeqCst, guard);
+                    if previous_spot_replacement.is_ok() {
+                        let child_replacement = pop_descriptor.child.compare_and_set(Shared::null(), Owned::new(PopSubDescr::new(pop_descriptor.clone(), raw_value)), SeqCst, guard);
+                        if child_replacement.is_ok() {
+                            previous_spot.compare_and_set(packed, Shared::null().with_tag(TagNotValue), SeqCst, guard);
+                        }
+                        else {
+                            let packed_2 = pack_descr(BaseDescr::PopDescrType(pop_descriptor.clone()), guard);
+                            previous_spot.compare_and_set(packed_2, expected, SeqCst, guard);
+                        }
                     }
-                    else {
-                        let packdescr = vector.packdescr(self);
-                        spot.compare_and_set(packdescr, expected, SeqCst, guard);
-                    }
-                }
+                },
             }
         }
-        
-        let packing = self.vec.pack_descr(self);
-        self.vec.get_spot(newdescr.pos, guard).compare_and_set(packing, NotValue, SeqCst, guard);
-        
-        return self.child.load(SeqCst, guard) != STATE_FAILED;
-    }
 
-    pub fn complete_pop_sub(&self, spot: Spot, old: Shared<usize>, descr: &PopSubDescr, guard: &Guard) -> bool {
-        let cloned = descr.clone();
-    
-        let owned_descr = Owned::new(cloned).into_shared(guard);
-    
+        let packed_pop_descriptor = pack_descr(BaseDescr::PopDescrType(pop_descriptor.clone()), guard);
+
+        spot.compare_and_set(packed_pop_descriptor, Shared::null().with_tag(TagNotValue), SeqCst, guard);
+
+        let child_state = unsafe { pop_descriptor.child.load(SeqCst, guard).deref() }.state;
+
+        return child_state != STATE_FAILED;
+    }
+        
+
+    pub fn complete_pop_sub(&self, spot: Spot, old: Shared<usize>, descr: Rc<PopSubDescr>, guard: &Guard) -> bool {
+        let f = descr.as_ref();
+        let owned_descr = Owned::new(f.clone()).into_shared(guard);
         let cas_result = descr.parent.child
-            .compare_and_set(Shared::<PopSubDescr>::null(), owned_descr, SeqCst, guard);
+            .compare_and_set(Shared::null(), owned_descr, SeqCst, guard);
     
         if let Err(e) = cas_result {
             println!("The inserting the pop sub desc failed {:?}", e);
@@ -621,13 +617,27 @@ impl PopDescr {
 // PopSubDescr consists of a reference to a previously placed PopDescr (parent)
 // and the value that was replaced by the PopSubDescr (value).
 #[derive(Clone)]
+// #[derive(Debug)]
 pub struct PopSubDescr {
     parent: Rc<PopDescr>,
     value: usize,
+    state: u8
 }
 
-// struct PopDescr {
-//     vec: Rc<Vector>,
-//     pos: usize,
-//     state: u8,
-// }
+impl PopSubDescr {
+    pub fn new(parent: Rc<PopDescr>, value: usize) -> PopSubDescr {
+        PopSubDescr {
+            parent: parent,
+            value: value,
+            state: STATE_UNDECIDED
+        }
+    }
+
+    pub fn with_state_and_parent(state: u8, parent: Rc<PopDescr>) -> PopSubDescr {
+        PopSubDescr {
+            parent: parent,
+            value: 0,
+            state: state
+        }
+    }
+}
