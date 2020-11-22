@@ -1,19 +1,27 @@
 use std::rc::Rc;
 use std::sync::Arc;
 use crossbeam_epoch::{self as epoch, Atomic, Guard, Shared, Owned};
-use std::sync::atomic::Ordering::SeqCst;
-use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering::{SeqCst, Release, Acquire};
+use std::sync::atomic::{AtomicUsize, AtomicBool};
 
 const TagNotValue: usize = 1;
 const TagNotCopied: usize = 2;
 const TagDescr: usize = 3;
 const TagResize: usize = 4;
 
-const LIMIT: usize = usize::MAX;
+const NO_RESULT: usize = usize::MAX;
+
+const LIMIT: usize = 1000;
 
 type Spot = Arc<Atomic<usize>>;
 
 fn make_spot(u: Shared<usize>) -> Spot {
+    return Arc::new(Atomic::from(u));
+}
+
+type OpSpot = Arc<Atomic<BaseOp>>;
+
+fn make_op_spot(u: Shared<BaseOp>) -> OpSpot {
     return Arc::new(Atomic::from(u));
 }
 
@@ -38,6 +46,7 @@ pub enum BaseDescr {
 #[derive(Clone)]
 pub struct PushDescr {
     // vec: Atomic<WaitFreeVector>,
+    owner: Atomic<BaseOp>,
     value: usize,
     pos: usize,
     state: Atomic<u8>,
@@ -46,6 +55,8 @@ pub struct PushDescr {
 impl PushDescr {
     pub fn new(pos: usize, value: usize) -> PushDescr {
         PushDescr {
+            owner: Atomic::null(),
+            // vec,
             pos,
             value,
             state: Atomic::new(STATE_UNDECIDED),
@@ -88,16 +99,62 @@ pub fn value_base(descr: BaseDescr) -> Option<usize> {
     }
 }
 
+pub enum BaseOp {
+    PushOpType(PushOp),
+    PopOpType(PopOp),
+}
+
+pub struct PushOp {
+    done: Atomic<AtomicBool>,
+    value: usize,
+    result: Atomic<AtomicUsize>,
+    can_return: Atomic<AtomicBool>,
+}
+impl PushOp {
+    pub fn new(value: usize) -> PushOp {
+        PushOp {
+            done: Atomic::new(AtomicBool::new(false)),
+            value,
+            result: Atomic::new(AtomicUsize::new(NO_RESULT)),
+            can_return: Atomic::new(AtomicBool::new(false)),
+        }
+    }
+}
+
+pub struct PopOp {
+
+}
+
 pub struct WaitFreeVector {
     storage: Atomic<Contiguous>,
     size: Atomic<AtomicUsize>,
+
+    thread_ops: Vec<OpSpot>,
+    thread_to_help: Vec<AtomicUsize>,
+    num_threads: usize,
 }
 
 impl WaitFreeVector {
-    pub fn new(capacity: usize) -> WaitFreeVector {
+    pub fn new(capacity: usize, num_threads: usize) -> WaitFreeVector {
+        let mut thread_ops: Vec<OpSpot> = Vec::new();
+        let mut thread_to_help: Vec<AtomicUsize> = Vec::new();
+        // let thread_to_help = vec![0; num_threads];
+
+        for _ in 0..num_threads {
+            let i: Shared<BaseOp> = Shared::null();
+            thread_ops.push(make_op_spot(i));
+
+            let i: AtomicUsize = AtomicUsize::new(0);
+            thread_to_help.push(i);
+        }
+
         WaitFreeVector{
             storage: Atomic::new(Contiguous::new(capacity)),
             size: Atomic::new(AtomicUsize::new(0)),
+
+            thread_ops,
+            thread_to_help,
+            num_threads,
         }
     }
 
@@ -106,6 +163,32 @@ impl WaitFreeVector {
         let shsize = self.size.load(SeqCst, guard);
         let sizeusizeptr = unsafe { shsize.deref() }.clone();
         sizeusizeptr.load(SeqCst)
+    }
+
+    pub fn help_if_needed(&self, tid: usize) {
+        if tid >= self.num_threads {
+            panic!("tid {} out of bounds for {} threads", tid, self.num_threads);
+        }
+
+        let help = self.thread_to_help[tid].load(Acquire);
+
+        self.thread_to_help[tid].store((help + 1) % self.num_threads, Release);
+
+        self.help(tid, help);
+    }
+    
+    pub fn help(&self, mytid: usize, help: usize) {
+        let guard = &epoch::pin();
+
+        let opptr = self.thread_ops[help].load(SeqCst, guard);
+
+        if opptr.is_null() {
+            return;
+        }
+
+        self.an_complete_base(mytid, opptr, guard);
+
+        self.thread_ops[help].compare_and_set(opptr, Shared::null(), SeqCst, guard);
     }
 
     pub fn get_spot(&self, position: usize, guard: &Guard) -> Spot {
@@ -183,7 +266,91 @@ impl WaitFreeVector {
         }
     }
 
+    pub fn an_complete_base(&self, tid: usize, opptr: Shared<BaseOp>, guard: &Guard) -> bool {
+        let op: &BaseOp = unsafe { opptr.deref() };        
+        match op {
+            BaseOp::PushOpType(o) => self.an_complete_push(tid, o, opptr, guard),
+            _ => false,
+        }
+    }
 
+    // the an_ prefix means this method is to complete an op on the announcement table, not in a descriptor
+    pub fn an_complete_push(&self, tid: usize, op: &PushOp, opptr: Shared<BaseOp>, guard: &Guard) -> bool {
+        let shsize = self.size.load(SeqCst, guard);
+        let usizeptr = unsafe { shsize.deref() }.clone();
+        let mut pos = usizeptr.load(SeqCst);
+
+        loop {
+            let spot = self.get_spot(pos, guard);
+            let expected = spot.load(SeqCst, guard);
+
+            let doneptr = op.done.load(SeqCst, guard);
+            let done = unsafe { doneptr.deref() };
+            let rawdone = done.load(SeqCst);
+
+            if rawdone {
+                break;
+            }
+
+            // let expected = spot.load(SeqCst, guard);
+
+            if let Some(x) = unpack_descr(expected, guard) {
+                let base = unsafe { x.deref() };
+                self.complete_base(spot, expected, base, guard);
+                continue;
+            }
+
+            if expected.tag() != TagNotValue {
+                pos += 1;
+                continue;
+            }
+
+            let pdescr = PushDescr::new(pos, op.value);
+            pdescr.owner.store(opptr, SeqCst);
+            let descr = BaseDescr::PushDescrType(pdescr);
+            let descrptr = pack_descr(descr.clone(), guard);
+
+            if let Ok(_) = spot.compare_and_set(expected, descrptr, SeqCst, guard) {
+                let completeres = self.complete_base(spot, descrptr, &descr, guard);
+                
+                if completeres {
+                    let resptr = op.result.load(SeqCst, guard);
+                    let res = unsafe { resptr.deref() };
+                    res.store(pos, SeqCst);
+
+                    usizeptr.fetch_add(1, SeqCst);
+
+                    let dptr = op.done.load(SeqCst, guard);
+                    let done = unsafe { dptr.deref() };
+                    done.store(true, SeqCst);
+
+                    let retptr = op.can_return.load(SeqCst, guard);
+                    let ret = unsafe { retptr.deref() };
+                    ret.store(true, SeqCst);
+                }
+                else {
+                    if pos == 0 {
+                        pos += 1;
+                    }
+                    else {
+                        pos -= 1;
+                    }
+                }
+            }
+            // self.get_spot(pos, guard: &Guard)
+        }
+
+        loop {
+            let retptr = op.can_return.load(SeqCst, guard);
+            let ret = unsafe { retptr.deref() };
+            if ret.load(SeqCst) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(3));
+        }
+
+        true
+    }
 
     pub fn at(&self, tid: usize, pos: usize) -> Option<usize> {
         let guard = &epoch::pin();
@@ -214,16 +381,16 @@ impl WaitFreeVector {
         None
     }
 
-    pub fn push_back(&self, tid: usize, value: usize) -> usize {
+    pub fn push_back(&self, tid: usize, value: usize) {
+        self.help_if_needed(tid);
+        
         let guard = &epoch::pin();
-
-        // TODO: announcement table
 
         let shvalue = Owned::new(value).into_shared(guard);
 
-        if shvalue.is_null() {
-            panic!("CANNOT PUSH NULL POINTER");
-        }
+        // if shvalue.is_null() {
+        //     panic!("CANNOT PUSH NULL POINTER");
+        // }
 
         let shsize = self.size.load(SeqCst, guard);
         let sizeusizeptr = unsafe { shsize.deref() }.clone();
@@ -240,7 +407,7 @@ impl WaitFreeVector {
                     match res {
                         Ok(_) => {
                             sizeusizeptr.fetch_add(1, SeqCst);
-                            return 0;
+                            return;
                         },
                         Err(_) => {
 
@@ -258,7 +425,7 @@ impl WaitFreeVector {
                     Ok(_) => {
                         if self.complete_base(spot, descrptr, &cdescr, guard) {
                             sizeusizeptr.fetch_add(1, SeqCst);
-                            return pos;
+                            return;
                         }
                         else {
                             pos -= 1;
@@ -282,9 +449,25 @@ impl WaitFreeVector {
             // let expected: usize = unsafe { spotptr.deref() }.clone();
         }
 
-        // TODO: add this op to annoucement table
+        let op: Shared<BaseOp> = Owned::new(BaseOp::PushOpType(PushOp::new(value))).into_shared(guard);
 
-        0
+        self.announce_op(tid, op.clone(), guard);
+    }
+
+    pub fn announce_op(&self, tid: usize, op: Shared<BaseOp>, guard: &Guard) {
+        if tid >= self.num_threads {
+            panic!("tid {} out of bounds for {} threads", tid, self.num_threads);
+        }
+
+        let cur = self.thread_ops[tid].load(SeqCst, guard);
+
+        if !cur.is_null() {
+            println!("replacing existing op in annoucement table");
+        }
+
+        self.thread_ops[tid].compare_and_set(cur, op, SeqCst, guard);
+
+        self.help(tid, tid);
     }
 
     pub fn complete_push(&self, spot: Spot, old: Shared<usize>, descr: &PushDescr, guard: &Guard) -> bool {
