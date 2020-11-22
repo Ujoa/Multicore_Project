@@ -4,18 +4,6 @@ use crossbeam_epoch::{self as epoch, Atomic, Guard, Shared, Owned};
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::atomic::AtomicUsize;
 
-
-// IsDescriptor when non-nul | 0b01
-// NotValue when null | 0b00
-// NotCopied when null | 0b01
-// Resizing when non-null | 0b10
-
-// const NotValue: usize = 0b00;
-// const NotCopied: usize = 0b01;
-
-// const MarkDesc: usize = 0b01;
-// const MarkResize: usize = 0b10;
-
 const TagNotValue: usize = 1;
 const TagNotCopied: usize = 2;
 const TagDescr: usize = 3;
@@ -27,28 +15,6 @@ type Spot = Arc<Atomic<usize>>;
 
 fn make_spot(u: Shared<usize>) -> Spot {
     return Arc::new(Atomic::from(u));
-}
-
-pub trait Vector {
-    // API Methods
-    fn push_back(&self, value: usize) -> bool;
-    fn pop_back(&self) -> usize;
-    fn at(&self, index: usize) -> usize;
-    fn insert_at(&self, index: usize, element: usize) -> bool;
-    fn erase_at(&self, index: usize) -> bool;
-    fn cwrite(&self, index: usize, element: usize) -> bool;
-
-    // A private method that will be used internally, but
-    // not exposed.
-    // fn announce_op(&self, descriptor: dyn Descriptor);
-}
-
-
-
-enum PushState {
-    Undecided,
-    Failed,
-    Passed,
 }
 
 // replace pushstate enum
@@ -78,57 +44,13 @@ pub struct PushDescr {
 }
 
 impl PushDescr {
-    // vec: Atomic<WaitFreeVector>,
     pub fn new(pos: usize, value: usize) -> PushDescr {
         PushDescr {
-            // vec,
             pos,
             value,
             state: Atomic::new(STATE_UNDECIDED),
         }
     }
-
-    // pub fn statecas(&self, expected: Shared<u8>, new: Owned<u8>, guard: &Guard) {
-    //     self.state.compare_and_set(expected, new, SeqCst, guard);
-    // }
-
-    // pub fn stateload(&self, guard: &Guard) -> (Shared<u8>, &Guard) {
-    //     (self.state.load(SeqCst, guard), guard)
-    // }
-
-    // pub fn give_me(&self) -> PushDescr {
-    //     PushDescr {
-    //         value: self.value,
-
-    //     }
-    // }
-}
-
-impl DescriptorTrait for PushDescr {
-    // fn descr_type() -> DescriptorType {
-    //     DescriptorType::PushDescrType
-    // }
-    fn complete(&self, guard: &Guard) -> bool {
-        // let vectorptr = self.vec.load(SeqCst, guard);
-        // let vector = unsafe { vectorptr.deref() };
-        // let spot = vector.get_spot(self.pos, guard);
-
-        // if self.pos == 0 {
-        //     self.statecas(StateUndecided, StatePassed);
-
-        //     spot.compare_and_set(vector.pack_descr(&self), self.value);
-        // }
-
-
-
-
-        true
-    }
-    fn value(&self) -> usize {
-        todo!()
-    }
-
-
 }
 
 pub fn pack_descr(descr: BaseDescr, guard: &Guard) -> Shared<usize> {
@@ -167,7 +89,7 @@ pub fn value_base(descr: BaseDescr) -> Option<usize> {
 }
 
 pub struct WaitFreeVector {
-    pub storage: Atomic<Contiguous>,
+    storage: Atomic<Contiguous>,
     size: Atomic<AtomicUsize>,
 }
 
@@ -303,9 +225,6 @@ impl WaitFreeVector {
             panic!("CANNOT PUSH NULL POINTER");
         }
 
-        // Should be safe, user should never pass us a descriptor
-        // let realvalue = unsafe { shvalue.deref() }.clone();
-
         let shsize = self.size.load(SeqCst, guard);
         let sizeusizeptr = unsafe { shsize.deref() }.clone();
         let mut pos = sizeusizeptr.load(SeqCst);
@@ -371,12 +290,6 @@ impl WaitFreeVector {
     pub fn complete_push(&self, spot: Spot, old: Shared<usize>, descr: &PushDescr, guard: &Guard) -> bool {
 
         let newdescr: PushDescr = descr.clone();
-        // let mystate: Shared<u8> = newdescr.state.load(SeqCst, guard);
-        // if mystate.is_null() {
-        //     panic!("STATE OF A DESCRIPTOR WAS NULL IN complete_push")
-        // }
-
-        // let rawstate: u8 = unsafe { mystate.deref() }.clone();
 
         let (mut mystate, mut rawstate) = loadstate(&newdescr, guard);
 
@@ -393,31 +306,6 @@ impl WaitFreeVector {
 
             return true;
         }
-
-
-        // let mut failures: usize = 0;
-
-        // let (spot2, current) = loop {
-        //     let spot2: Spot = self.get_spot(newdescr.pos - 1, guard);
-        //     let current: Shared<usize> = spot2.load(SeqCst, guard);
-
-        //     if rawstate == STATE_UNDECIDED {
-        //         match unpack_descr(current, guard) {
-        //             Some(shared_descr) => {
-        //                 if failures >= LIMIT {
-        //                     descr.state.compare_and_set(mystate, Owned::new(STATE_PASSED), SeqCst, guard);
-        //                 }
-        //                 failures += 1;
-        //                 let base_descr = unsafe { shared_descr.deref() };
-        //                 self.complete_base(spot2, current, base_descr, guard);
-        //             },
-        //             None => break (spot2, current),
-        //         }
-        //     } else {
-        //         break (spot2, current);
-        //     }
-        // };
-
 
         let spot2: Spot = self.get_spot(newdescr.pos - 1, guard);
         let current: Shared<usize> = spot2.load(SeqCst, guard);
@@ -483,24 +371,12 @@ impl WaitFreeVector {
     }
 }
 
-// impl Vector for WaitFreeVector {
-//     fn push_back(&self, value: usize) -> bool {
-//         todo!()
-//     }
-//     fn pop_back(&self) -> usize { todo!() }
-//     fn at(&self, _: usize) -> usize { todo!() }
-//     fn insert_at(&self, _: usize, _: usize) -> bool { todo!() }
-//     fn erase_at(&self, _: usize) -> bool { todo!() }
-//     fn cwrite(&self, _: usize, _: usize) -> bool { todo!() }
-//     //fn announce_op(&self, _: (dyn Descriptor + 'static)) { todo!() }
-// }
-
-pub struct Contiguous {
+struct Contiguous {
     // vector: Atomic<WaitFreeVector>,
-    pub old: Atomic<Contiguous>,
-    pub capacity: usize,
+    old: Atomic<Contiguous>,
+    capacity: usize,
     // array is a regular array of atomic pointers
-    pub array: Atomic<Vec<Spot>>,
+    array: Atomic<Vec<Spot>>,
 }
 
 impl Contiguous {
@@ -513,13 +389,7 @@ impl Contiguous {
             arr.push(make_spot(init));
         }
 
-        // Will use later for NotCopied
-        // for i in 0..capacity {
-        //     arr[i] =
-        // }
-
         Contiguous {
-            // vector,
             old: Atomic::null(),
             capacity,
             array: Atomic::new(arr),
@@ -559,13 +429,6 @@ impl Contiguous {
     }
 
     pub fn get_spot(&self, position: usize, guard: &Guard) -> Spot {
-        // if position >= self.capacity {
-        //     // resize
-        //     // dbg!(position);
-        //     // dbg!(self.capacity);
-        //     // todo!();
-        // }
-
         let vec = unsafe {self.array.load(SeqCst,guard).deref()};
         let spot = vec[position].load(SeqCst, guard);
 
@@ -593,99 +456,3 @@ struct PopSubDescr {
     parent: Rc<PopDescr>,
     value: usize,
 }
-
-// #[derive(Clone)]
-// enum DescriptorType {
-//     PushDescrType,
-//     PopDescrType,
-//     PopSubDescrType,
-// }
-
-
-
-
-
-struct ShiftOp {
-    vec: Rc<Vector>,
-    pos: usize,
-    incomplete: bool,
-    next: Arc<ShiftDescr>,
-}
-
-struct ShiftDescr {
-    op: Rc<ShiftOp>,
-    pos: usize,
-    value: usize,
-    prev: Rc<ShiftDescr>,
-    next: Arc<ShiftDescr>,
-}
-
-// Implementations for the different Descriptors
-// impl PopDescr {
-//     pub fn new(vec: Rc<Vector>, pos: usize) -> PopDescr {
-//         PopDescr {
-//             vec,
-//             pos,
-//             child: None
-//         }
-//     }
-// }
-
-// impl DescriptorTrait for PopDescr {
-//     fn descr_type() -> DescriptorType {
-//         DescriptorType::PopDescrType
-//     }
-//     fn complete(&self, guard: &Guard) -> bool {
-//         todo!()
-//     }
-//     fn value(&self) -> usize {
-//         todo!()
-//     }
-// }
-
-
-// impl PopSubDescr {
-//     pub fn new(parent: Rc<PopDescr>, value: usize) -> PopSubDescr {
-//         PopSubDescr {
-//             parent,
-//             value,
-//         }
-//     }
-// }
-
-// impl DescriptorTrait for PopSubDescr {
-//     fn descr_type() -> DescriptorType {
-//         DescriptorType::PopSubDescrType
-//     }
-//     fn complete(&self, guard: &Guard) -> bool {
-//         todo!()
-//     }
-//     fn value(&self) -> usize {
-//         todo!()
-//     }
-// }
-
-
-// impl DescriptorTrait for ShiftOp {
-//     fn descr_type() -> DescriptorType {
-//         todo!()
-//     }
-//     fn complete(&self, guard: &Guard) -> bool {
-//         todo!()
-//     }
-//     fn value(&self) -> usize {
-//         todo!()
-//     }
-// }
-
-// impl DescriptorTrait for ShiftDescr {
-//     fn descr_type() -> DescriptorType {
-//         todo!()
-//     }
-//     fn complete(&self, guard: &Guard) -> bool {
-//         todo!()
-//     }
-//     fn value(&self) -> usize {
-//         todo!()
-//     }
-// }
