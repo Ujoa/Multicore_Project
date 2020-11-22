@@ -11,7 +11,7 @@ const TagResize: usize = 4;
 
 const NO_RESULT: usize = usize::MAX;
 
-const LIMIT: usize = 1000;
+const LIMIT: usize = 1000000;
 
 type Spot = Arc<Atomic<usize>>;
 
@@ -201,7 +201,7 @@ impl WaitFreeVector {
     }
 
     pub fn resize(&self){
-        println!("Resizing");
+        // println!("Resizing");
         let guard = &epoch::pin();
         let old = self.storage.load(SeqCst, guard);
 
@@ -305,7 +305,7 @@ impl WaitFreeVector {
 
             let pdescr = PushDescr::new(pos, op.value);
             pdescr.owner.store(opptr, SeqCst);
-            let descr = BaseDescr::PushDescrType(pdescr);
+            let descr = BaseDescr::PushDescrType(Rc::new(pdescr));
             let descrptr = pack_descr(descr.clone(), guard);
 
             if let Ok(_) = spot.compare_and_set(expected, descrptr, SeqCst, guard) {
@@ -684,7 +684,7 @@ impl WaitFreeVector {
             .compare_and_set(Shared::null(), owned_descr, SeqCst, guard);
     
         if let Err(e) = cas_result {
-            println!("The inserting the pop sub desc failed {:?}", e);
+            // println!("The inserting the pop sub desc failed {:?}", e);
         }
     
         let result = if descr.parent.child.load(SeqCst, guard) == owned_descr {
@@ -694,7 +694,7 @@ impl WaitFreeVector {
         };
     
         if let Err(e) = result {
-            println!("Something went wrong {:?}", e)
+            // println!("Something went wrong {:?}", e)
         }
     
         descr.parent.child.load(SeqCst, guard) == owned_descr
@@ -750,9 +750,9 @@ impl Contiguous {
 
             let reloaded_old_value = load_vec[position].load(SeqCst, guard);
             let updated_our_vector = current_spot.compare_and_set(expected_value, reloaded_old_value, SeqCst, guard);
-            if updated_our_vector.is_err() {
-                println!("Couldn't overwrite the spot in our vector");
-            }
+            // if updated_our_vector.is_err() {
+            //     println!("Couldn't overwrite the spot in our vector");
+            // }
         }
     }
 
