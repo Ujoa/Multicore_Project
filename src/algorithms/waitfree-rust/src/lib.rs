@@ -378,7 +378,7 @@ impl WaitFreeVector {
         return rawstate == STATE_PASSED;
     }
 
-    pub fn pop_back(&self, tid: usize) -> (bool, Atomic<usize>) {
+    pub fn pop_back(&self, tid: usize) -> Option<Atomic<usize>> {
         let guard = &epoch::pin();
         
         // TODO: announcement table
@@ -389,27 +389,27 @@ impl WaitFreeVector {
     
         for failures in 0..=LIMIT {
             if pos == 0 {
-                return {false, None};
+                return None;
             }
     
             let spot = self.get_spot(pos, guard);
             let expectedptr = spot.load(SeqCst, guard);
             if expectedptr.tag() == TagNotValue {
                 
-                let descr = BaseDescr::PopDescrType(PopDescr::new(self, pos)));
+                let descr = BaseDescr::PopDescrType(PopDescr::new(self, pos));
                 let cdescr = descr.clone();
                 let descrptr = pack_descr(descr, guard);
     
                 match spot.compare_and_set(expectedptr, descrptr, SeqCst, guard) {
                     Ok(_) => {
-                        let res = self.complete_base(spot, descrptr, &cdescr, guard)
+                        let res = self.complete_base(spot, descrptr, &cdescr, guard);
                         if res {
                             let newdescr: PopDescr = descr.clone();
                             let child = newdescr.child;
                             let mut value = child.load(SeqCst);
                             
                             sizeusizeptr.fetch_add(-1, SeqCst);
-                            return {true, value};
+                            return Some(value);
                         }
                         else {
                             pos -= 1;
@@ -433,6 +433,8 @@ impl WaitFreeVector {
             
             // announcement table stuff
         }
+
+        None
     }
         
     pub fn complete_pop(&self, spot: Atomic<usize>, old: Shared<usize>, descr: &PopDescr, guard: &Guard) -> bool {
