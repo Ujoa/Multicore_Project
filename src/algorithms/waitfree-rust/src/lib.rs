@@ -1,7 +1,7 @@
 use std::rc::Rc;
 use std::sync::Arc;
 use crossbeam_epoch::{self as epoch, Atomic, Guard, Shared, Owned};
-use std::sync::atomic::Ordering::SeqCst;
+use std::sync::atomic::Ordering::{SeqCst, Release, Acquire};
 use std::sync::atomic::{AtomicUsize, AtomicBool};
 
 const TagNotValue: usize = 1;
@@ -125,31 +125,27 @@ pub struct PopOp {
 
 }
 
-pub fn help_if_needed(tid: usize) {
-    
-}
-
-pub fn help(mytid: usize, tid: usize) {
-    // let t_op
-}
-
 pub struct WaitFreeVector {
     storage: Atomic<Contiguous>,
     size: Atomic<AtomicUsize>,
 
     thread_ops: Vec<OpSpot>,
-    thread_to_help: Vec<usize>,
+    thread_to_help: Vec<AtomicUsize>,
     num_threads: usize,
 }
 
 impl WaitFreeVector {
     pub fn new(capacity: usize, num_threads: usize) -> WaitFreeVector {
         let mut thread_ops: Vec<OpSpot> = Vec::new();
-        let thread_to_help = vec![0; num_threads];
+        let mut thread_to_help: Vec<AtomicUsize> = Vec::new();
+        // let thread_to_help = vec![0; num_threads];
 
         for _ in 0..num_threads {
             let i: Shared<BaseOp> = Shared::null();
             thread_ops.push(make_op_spot(i));
+
+            let i: AtomicUsize = AtomicUsize::new(0);
+            thread_to_help.push(i);
         }
 
         WaitFreeVector{
@@ -167,6 +163,32 @@ impl WaitFreeVector {
         let shsize = self.size.load(SeqCst, guard);
         let sizeusizeptr = unsafe { shsize.deref() }.clone();
         sizeusizeptr.load(SeqCst)
+    }
+
+    pub fn help_if_needed(&self, tid: usize) {
+        if tid >= self.num_threads {
+            panic!("tid {} is out of bounds", tid);
+        }
+
+        let help = self.thread_to_help[tid].load(Acquire);
+
+        self.thread_to_help[tid].store((help + 1) % self.num_threads, Release);
+
+        self.help(tid, help);
+    }
+    
+    pub fn help(&self, mytid: usize, help: usize) {
+        let guard = &epoch::pin();
+
+        let opptr = self.thread_ops[help].load(SeqCst, guard);
+
+        if opptr.is_null() {
+            return;
+        }
+
+        self.an_complete_base(mytid, opptr, guard);
+
+        self.thread_ops[help].compare_and_set(opptr, Shared::null(), SeqCst, guard);
     }
 
     pub fn get_spot(&self, position: usize, guard: &Guard) -> Spot {
@@ -240,6 +262,14 @@ impl WaitFreeVector {
         // let cdescr = descr.clone();
         match descr {
             BaseDescr::PushDescrType(d) => self.complete_push(spot, old, d, guard),
+            _ => false,
+        }
+    }
+
+    pub fn an_complete_base(&self, tid: usize, opptr: Shared<BaseOp>, guard: &Guard) -> bool {
+        let op: &BaseOp = unsafe { opptr.deref() };        
+        match op {
+            BaseOp::PushOpType(o) => self.an_complete_push(tid, o, opptr, guard),
             _ => false,
         }
     }
