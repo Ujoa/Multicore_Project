@@ -99,6 +99,7 @@ pub fn value_base(descr: BaseDescr) -> Option<usize> {
 pub enum BaseOp {
     PushOpType(PushOp),
     PopOpType(Arc<PopOp>),
+    WriteOpType(WriteOp),
 }
 
 #[derive(Clone)]
@@ -298,11 +299,13 @@ impl WaitFreeVector {
         }
     }
 
+    // the an_ prefix means this method is to complete an op on the announcement table, not in a descriptor
     pub fn an_complete_base(&self, tid: usize, opptr: Shared<BaseOp>, guard: &Guard) -> bool {
         let op: &BaseOp = unsafe { opptr.deref() };
         match op {
             BaseOp::PushOpType(o) => self.an_complete_push(tid, o, opptr, guard),
             BaseOp::PopOpType(o) => self.an_complete_pop(tid, o, opptr, guard),
+            BaseOp::WriteOpType(o) => self.an_complete_cwrite(tid, o, opptr, guard),
         }
     }
 
