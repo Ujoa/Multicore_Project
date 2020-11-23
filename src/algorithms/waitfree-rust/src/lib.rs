@@ -586,7 +586,7 @@ impl WaitFreeVector {
             if failures >= LIMIT {
                 let set_to_passed = descr.state.compare_and_set(mystate, Owned::new(STATE_PASSED), SeqCst, guard);
                 if set_to_passed.is_err() {
-                    dbg!("Could not update the descriptor state to PASSED");
+                    // dbg!("Could not update the descriptor state to PASSED");
                 }
             }
 
@@ -600,13 +600,13 @@ impl WaitFreeVector {
             if current.tag() == TagNotValue {
                 let set_to_failed = descr.state.compare_and_set(mystate, Owned::new(STATE_FAILED), SeqCst, guard);
                 if set_to_failed.is_err() {
-                    dbg!("Could not update the descriptor state to FAILED");
+                    // dbg!("Could not update the descriptor state to FAILED");
                 }
             }
             else {
                 let set_to_passed = descr.state.compare_and_set(mystate, Owned::new(STATE_PASSED), SeqCst, guard);
                 if set_to_passed.is_err() {
-                    dbg!("Could not update the descriptor state to PASSED");
+                    // dbg!("Could not update the descriptor state to PASSED");
                 }
             }
         }

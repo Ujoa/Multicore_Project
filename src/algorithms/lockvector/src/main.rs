@@ -1,5 +1,5 @@
 mod lib;
-use lib::WaitFreeVector;
+use lib::LockVector;
 
 
 use std::sync::Arc;
@@ -11,8 +11,9 @@ use std::time::Instant;
 fn test_pushback(num_threads: usize){
 
     println!("TEST PUSHBACK {} threads", num_threads);
+    // let size = (num_threads as usize) * 30;
     let size = num_threads;
-    let v = Arc::new(WaitFreeVector::new(size, num_threads));
+    let v = Arc::new(LockVector::new(size));
     let mut threads = Vec::new();
 
 
@@ -22,7 +23,7 @@ fn test_pushback(num_threads: usize){
             thread::spawn(move || {
 
                 for j in 0..30{
-                    thread_v.push_back(i as usize, ((i as usize)+1)*100+(j as usize));
+                    thread_v.push_back(((i as usize)+1)*100+(j as usize));
                 }
                 
             })
@@ -34,7 +35,7 @@ fn test_pushback(num_threads: usize){
     }
 
     for i in 0..v.length(){
-        println!("{}", v.at(0,i).unwrap());
+        println!("{}", v.at(0).unwrap());
     }
 }
 
@@ -44,12 +45,12 @@ fn test_popback(num_threads: usize){
     // let size = 1000;
     println!("TEST POPBACK {} threads", num_threads);
 
-    let v = Arc::new(WaitFreeVector::new(size, num_threads));
+    let v = Arc::new(LockVector::new(size));
     // let good: Arc<WaitFreeVector> = Arc::new(WaitFreeVector::new(num_threads as usize));
     let mut threads = Vec::new();
 
     for i in 0..size{
-        v.push_back(0, i as usize);
+        v.push_back(i as usize);
     }
 
     for i in 0..num_threads{
@@ -61,7 +62,7 @@ fn test_popback(num_threads: usize){
                     let mut res = 0;
                     for _ in 0..len{
                         // let val = 10;
-                        if let Some(val) = v_thread.pop_back(i) {
+                        if let Some(val) = v_thread.pop_back() {
                             res += val;
                         }
                     }
@@ -77,11 +78,11 @@ fn test_popback(num_threads: usize){
     }
 
     for i in 0..v.length(){
-        println!("{}", v.at(0,i).unwrap());
+        println!("{}", v.at(i).unwrap());
     }
 
     if v.length() > 0 {
-        match v.pop_back(0) {
+        match v.pop_back() {
             Some(val) => {
                 println!("res-pop_back{}", val);
             }
@@ -100,17 +101,17 @@ fn test_cwrite(num_threads: usize){
     let len = 44;
     let size = num_threads;
 
-    let v = Arc::new(WaitFreeVector::new(size, num_threads));
+    let v = Arc::new(LockVector::new(size));
     let mut threads = Vec::new();
     for _ in 0..len{
-        v.push_back(0,0);
+        v.push_back(0);
     }
 
     let mut cnt = Vec::new();
     for _ in 0..num_threads{
-        let new_v = Arc::new(WaitFreeVector::new(len, num_threads));
+        let new_v = Arc::new(LockVector::new(len));
         for _ in 0..len {
-            new_v.push_back(0,0);
+            new_v.push_back(0);
         }
         cnt.push(new_v);
     }
@@ -123,7 +124,7 @@ fn test_cwrite(num_threads: usize){
 
                 for j in 0..1000 {
                     let pos = j % thread_v.length();
-                    let prev = thread_v.at(i as usize, pos).unwrap();
+                    let prev = thread_v.at(pos).unwrap();
 
                     todo!("Implement CWrite and AddAt");
                     // if thread_v.cwrite(pos,prev, prev+1) {
@@ -143,7 +144,7 @@ fn test_cwrite(num_threads: usize){
 
     for i in 0..num_threads {
         for j in 0..len {
-            let val = cnt[i as usize].at(i as usize, j).unwrap();
+            let val = cnt[i as usize].at(j).unwrap();
             tot[j] += val;
             println!("{} ", val);
         }
@@ -152,7 +153,7 @@ fn test_cwrite(num_threads: usize){
     println!("-------------");
 
     for i in 0..len{
-        println!("{}", v.at(0, i).unwrap());
+        println!("{}", v.at(i).unwrap());
     }
 
     println!();
@@ -162,7 +163,7 @@ fn test_cwrite(num_threads: usize){
 
 fn test_all(max_num_threads: usize){
 
-    let max_ops = 12800;
+    let max_ops = 128000;
     let insert = 0;
     let erase = 1;
     let limit = 25;
@@ -172,7 +173,7 @@ fn test_all(max_num_threads: usize){
         print!("{}",num_threads);
 
         for t in vec![insert, erase]{
-            let v = Arc::new(WaitFreeVector::new(num_threads+1, num_threads));
+            let v = Arc::new(LockVector::new(num_threads+1));
 
             let each_thread = max_ops/num_threads;
             let extra = max_ops % num_threads;
@@ -188,7 +189,7 @@ fn test_all(max_num_threads: usize){
 
             let start_time = Instant::now();
             for i in 0..10 {
-                v.push_back(0,i);
+                v.push_back(i);
             }
 
             let mut threads = Vec::new();
@@ -219,15 +220,15 @@ fn test_all(max_num_threads: usize){
                                 let size = thread_v.length();
 
                                 if do_pushack {
-                                    thread_v.push_back(i, x);
+                                    thread_v.push_back(x);
                                 } else {
                                     if cur_op == 0 && size > 0 {
                                         // thread_v.insertat(r() % size, x);
                                     } else if cur_op == 1 && size > 0 {
-                                        thread_v.at(i, r() % size);
+                                        thread_v.at(r() % size);
                                     } else if cur_op == 2 && size > 0 {
                                         let pos = r() % size;
-                                        match thread_v.at(i, pos) {
+                                        match thread_v.at(pos) {
                                             Some(_) => {
                                                 // thread_v.cwrite(pos, old, x);
                                             },
@@ -261,16 +262,16 @@ fn test_all(max_num_threads: usize){
                                     let size = thread_v.length();
 
                                     if do_pushback {
-                                        thread_v.push_back(i, x);
+                                        thread_v.push_back(x);
                                     } else {
                                         if cur_op == 0 && size > 0 {
                                             // thread_v.erase(r()%size);
                                             // thread_v.pop_back();
                                         } else if cur_op == 1 && size > 0 {
-                                            thread_v.at(i, r()%size);
+                                            thread_v.at( r()%size);
                                         } else if cur_op == 2 && size > 0 {
                                             let pos = r () % size;
-                                            match thread_v.at(i, pos) {
+                                            match thread_v.at(pos) {
                                                 Some(_) => {
                                                     // thread_v.cwrite(pos, old, x);
                                                 },
@@ -307,167 +308,6 @@ fn test_all(max_num_threads: usize){
 
 }
 
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn insert_vals_seq(){
-        let vec = WaitFreeVector::new(3, 1);
-        vec.push_back(0, 10);
-        vec.push_back(0, 11);
-        vec.push_back(0, 12);
-    }
-    #[test]
-    fn len_seq(){
-        let vec = WaitFreeVector::new(3, 1);
-        vec.push_back(0, 10);
-        vec.push_back(0, 11);
-        assert_eq!(vec.length(), 2);
-    }
-
-    #[test]
-    fn seq_at(){
-        let vec = WaitFreeVector::new(2, 1);
-        vec.push_back(0, 10);
-        vec.push_back(0, 20);
-        vec.at(0, 0);
-
-        assert_eq!(vec.at(0, 0), Some(10));
-        assert_eq!(vec.at(0, 1), Some(20));
-    }
-
-    #[test]
-    fn seq_resize_at() {
-        // There should be 2 resizes happening here.
-        let vec = WaitFreeVector::new(1, 1);
-
-        vec.push_back(0, 10);
-        vec.push_back(0, 20);
-        vec.push_back(0, 30);
-        vec.push_back(0, 40);
-
-        assert_eq!(vec.at(0, 0), Some(10));
-        assert_eq!(vec.at(0, 1), Some(20));
-        assert_eq!(vec.at(0, 2), Some(30));
-        assert_eq!(vec.at(0, 3), Some(40));
-
-        assert_eq!(vec.length(), 4)
-    }
-
-    #[test]
-    fn threaded_insert_len(){
-        let capacity = 100;
-        let num_threads = 8;
-        let times = 12;
-        assert!(num_threads*times < capacity);
-
-        let vec = Arc::new(WaitFreeVector::new(100, num_threads));
-        let mut handles = Vec::new();
-
-        for i in 0..num_threads {
-
-            let vec_thread = vec.clone();
-            handles.push(
-                thread::spawn(
-                    move || {
-                        for _ in 0..times {
-                            vec_thread.push_back(i, i*i);
-                        }
-                    }
-                )
-            );
-        }
-
-        for handle in handles {
-            handle.join().unwrap();
-        }
-        assert_eq!(vec.length(), num_threads * times);
-    }
-
-    #[test]
-    fn threaded_insert_and_check_all_are_some(){
-        let capacity = 5;
-        let num_threads = 4;
-        let times = 3;
-        // assert!(num_threads*times < capacity);
-
-        let vec = Arc::new(WaitFreeVector::new(capacity, num_threads));
-        let mut handles = Vec::new();
-
-        for i in 0..num_threads {
-
-            let vec_thread = vec.clone();
-            handles.push(
-                thread::spawn(
-                    move || {
-                        for _ in 0..times {
-                            vec_thread.push_back(i, i*i);
-                        }
-                    }
-                )
-            );
-        }
-
-        for handle in handles {
-            handle.join().unwrap();
-        }
-        assert_eq!(vec.length(), num_threads * times);
-
-        for i in 0..num_threads * times {
-            assert!(vec.at(0, i).is_some());
-        }
-    }
-
-    #[test]
-    fn threaded_resize() {
-        let capacity = 1;
-        let num_threads = 4;
-        let times = 5;
-        assert!(num_threads*times > capacity);
-        
-        let vec = Arc::new(WaitFreeVector::new(100, num_threads));
-        let mut handles = Vec::new();
-
-        for i in 0..num_threads {
-
-            let vec_thread = vec.clone();
-            handles.push(
-                thread::spawn(
-                    move || {
-                        for _ in 0..times {
-                            vec_thread.push_back(i, i*i);
-                        }
-                    }
-                )
-            );
-        }
-
-        for handle in handles {
-            handle.join().unwrap();
-        }
-        println!("{}", vec.length());
-        assert_eq!(vec.length(), num_threads * times);
-    }
-
-    #[test]
-    fn pop_back() {
-        let vec = WaitFreeVector::new(2, 1);
-        vec.push_back(0, 10);
-        vec.push_back(0, 20);
-        vec.at(0, 0);
-
-        assert_eq!(vec.at(0, 0), Some(10));
-        assert_eq!(vec.at(0, 1), Some(20));
-
-        assert_eq!(vec.pop_back(0), Some(20));
-        assert_eq!(vec.pop_back(0), Some(10));
-        assert_eq!(vec.pop_back(0), None);
-
-        assert_eq!(vec.length(), 0);
-    }
-}
 
 fn main() {
     let num: usize = 64;
