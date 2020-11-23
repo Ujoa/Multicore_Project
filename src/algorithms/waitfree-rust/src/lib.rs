@@ -135,6 +135,26 @@ impl PopOp {
     }
 }
 
+#[derive(Clone)]
+pub struct WriteOp {
+    pos: usize,
+    done: Atomic<bool>,
+    old: usize,
+    new: usize,
+}
+
+impl WriteOp {
+    pub fn new(pos: usize, old: usize, new: usize) -> WriteOp {
+        WriteOp {
+            done: Atomic::new(false),
+            pos,
+            old,
+            new,
+        }
+    }
+}
+
+
 pub struct WaitFreeVector {
     storage: Atomic<Contiguous>,
     size: Atomic<AtomicUsize>,
