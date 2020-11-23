@@ -260,7 +260,7 @@ impl WaitFreeVector {
                 // println!("Resize {} ", new_capacity);
             },
             Err(_) => {
-                println!("Resize Failed");
+                // println!("Resize Failed");
             },
         }
 
