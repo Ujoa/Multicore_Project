@@ -483,7 +483,7 @@ impl WaitFreeVector {
         true
     }
 
-    pub fn cwrite(&self, tid: usize, pos: usize, expected: usize, new: usize) -> Option<usize> {
+    pub fn cwrite(&self, tid: usize, pos: usize, old: usize, new: usize) -> Option<usize> {
         self.help_if_needed(tid);
         let guard = &epoch::pin();
 
@@ -509,7 +509,7 @@ impl WaitFreeVector {
                     }
 
                     let realval = unsafe { oldptr.deref() }.clone();
-                    if realval == expected {
+                    if realval == old {
                         let res = spot.compare_and_set(oldptr, Owned::new(new), SeqCst, guard);
                         match res {
                             Ok(_) => {
@@ -524,8 +524,11 @@ impl WaitFreeVector {
             }
         }
 
-        // Todo announcement table
+        let op = Owned::new(BaseOp::WriteOpType(WriteOp::new(pos, old, new)));
 
+        self.announce_op(tid, op.into_shared(guard), guard);
+
+        // REPLACE THIS WITH FINAL ANNOUCEMENT TABLE STUFF
         None
     }
 
