@@ -30,16 +30,11 @@ const STATE_UNDECIDED: u8 = 0x00;
 const STATE_FAILED: u8 = 0x01;
 const STATE_PASSED: u8 = 0x02;
 
-trait DescriptorTrait {
-    // fn descr_type() -> DescriptorType;
-    fn complete(&self, guard: &Guard) -> bool;
-    fn value(&self) -> usize;
-}
-
 #[derive(Clone)]
 pub enum BaseDescr {
     PushDescrType(PushDescr),
-    PopDescrType(PopDescr),
+    PopDescrType(Rc<PopDescr>),
+    PopSubDescrType(Rc<PopSubDescr>),
 }
 
 // contains the value to be pushed and a state member
@@ -91,10 +86,11 @@ pub fn loadstate<'g>(newdescr: &PushDescr, guard: &'g Guard) -> (Shared<'g, u8>,
     (mystate, rawstate)
 }
 
-// returns None if the value is NotValue
 pub fn value_base(descr: BaseDescr) -> Option<usize> {
     match descr {
         BaseDescr::PushDescrType(d) => Some(d.value),
+        BaseDescr::PopDescrType(d) => None, // NOTE: C++ Version returns a NotValue instead
+        BaseDescr::PopSubDescrType(d) => Some(d.value),
         _ => None,
     }
 }
@@ -176,7 +172,7 @@ impl WaitFreeVector {
 
         self.help(tid, help);
     }
-    
+
     pub fn help(&self, mytid: usize, help: usize) {
         let guard = &epoch::pin();
 
@@ -205,7 +201,7 @@ impl WaitFreeVector {
     }
 
     pub fn resize(&self){
-        println!("Resizing");
+        // println!("Resizing");
         let guard = &epoch::pin();
         let old = self.storage.load(SeqCst, guard);
 
@@ -262,12 +258,14 @@ impl WaitFreeVector {
         // let cdescr = descr.clone();
         match descr {
             BaseDescr::PushDescrType(d) => self.complete_push(spot, old, d, guard),
+            BaseDescr::PopDescrType(d) => self.complete_pop(spot, old, d.clone(), guard),
+            BaseDescr::PopSubDescrType(d) => self.complete_pop_sub(spot, old, d.clone(), guard),
             _ => false,
         }
     }
 
     pub fn an_complete_base(&self, tid: usize, opptr: Shared<BaseOp>, guard: &Guard) -> bool {
-        let op: &BaseOp = unsafe { opptr.deref() };        
+        let op: &BaseOp = unsafe { opptr.deref() };
         match op {
             BaseOp::PushOpType(o) => self.an_complete_push(tid, o, opptr, guard),
             _ => false,
@@ -312,7 +310,7 @@ impl WaitFreeVector {
 
             if let Ok(_) = spot.compare_and_set(expected, descrptr, SeqCst, guard) {
                 let completeres = self.complete_base(spot, descrptr, &descr, guard);
-                
+
                 if completeres {
                     let resptr = op.result.load(SeqCst, guard);
                     let res = unsafe { resptr.deref() };
@@ -363,7 +361,7 @@ impl WaitFreeVector {
             let slot = self.get_spot(pos, guard);
             let ptr = slot.load(SeqCst, guard);
 
-            if ptr.tag() == TagNotValue {
+            if ptr.tag() == TagNotValue || ptr.is_null() {
                 return None;
             }
 
@@ -383,7 +381,7 @@ impl WaitFreeVector {
 
     pub fn push_back(&self, tid: usize, value: usize) {
         self.help_if_needed(tid);
-        
+
         let guard = &epoch::pin();
 
         let shvalue = Owned::new(value).into_shared(guard);
@@ -399,8 +397,8 @@ impl WaitFreeVector {
         for failures in 0..=LIMIT {
             let spot = self.get_spot(pos, guard);
             let expectedptr = spot.load(SeqCst, guard);
-            if expectedptr.tag() == TagNotValue 
-            // || expectedptr.tag() == TagNotCopied 
+            if expectedptr.tag() == TagNotValue
+            // || expectedptr.tag() == TagNotCopied
             {
                 if pos == 0 {
                     let res = spot.compare_and_set(expectedptr, shvalue, SeqCst, guard);
@@ -472,7 +470,7 @@ impl WaitFreeVector {
 
     pub fn complete_push(&self, spot: Spot, old: Shared<usize>, descr: &PushDescr, guard: &Guard) -> bool {
 
-        let newdescr: PushDescr = descr.clone();
+        let newdescr = descr.clone();
 
         let (mut mystate, mut rawstate) = loadstate(&newdescr, guard);
 
@@ -552,12 +550,162 @@ impl WaitFreeVector {
 
         return rawstate == STATE_PASSED;
     }
+
+    pub fn pop_back(&self, tid: usize) -> Option<usize> {
+        let guard = &epoch::pin();
+
+        // TODO: announcement table
+
+        let shsize = self.size.load(SeqCst, guard);
+        let sizeusizeptr = unsafe { shsize.deref() }.clone();
+        let mut pos = sizeusizeptr.load(SeqCst);
+
+        for failures in 0..=LIMIT {
+            if pos == 0 {
+                return None;
+            }
+
+            let spot = self.get_spot(pos, guard);
+            let expectedptr = spot.load(SeqCst, guard);
+            if expectedptr.tag() == TagNotValue {
+
+                let descr = BaseDescr::PopDescrType(Rc::new(PopDescr::new(pos)));
+                let cdescr = descr.clone();
+                let descrptr = pack_descr(descr, guard);
+
+                match spot.compare_and_set(expectedptr, descrptr, SeqCst, guard) {
+                    Ok(new_descriptor) => {
+                        let res = self.complete_base(spot, descrptr, &cdescr, guard);
+                        if res {
+                            if let BaseDescr::PopDescrType(p) = cdescr {
+                                let child = unsafe { p.child.load(SeqCst, guard).deref() };
+
+                                sizeusizeptr.fetch_sub(1, SeqCst);
+                                return Some(child.value);
+                            }
+                            return None
+                        }
+                        else {
+                            pos -= 1;
+                        }
+                    },
+                    Err(_) => (),
+
+                }
+            }
+            else {
+                match unpack_descr(expectedptr, guard) {
+                    Some(x) => {
+                        let descr = unsafe { x.deref() }.clone();
+                        self.complete_base(spot, expectedptr, &descr, guard);
+                    }
+                    None => {
+                        pos += 1;
+                    }
+                }
+            }
+
+            // announcement table stuff
+        }
+
+        None
+    }
+
+    pub fn complete_pop(&self, spot: Spot, old: Shared<usize>, pop_descriptor: Rc<PopDescr>, guard: &Guard) -> bool {
+
+        let previous_spot = self.get_spot(pop_descriptor.pos - 1, guard);
+        let mut failures = 0;
+
+        loop {
+            if !pop_descriptor.child.load(SeqCst, guard).is_null() {
+                break
+            }
+
+            if failures >= LIMIT {
+                let failed_child = PopSubDescr::with_state_and_parent(STATE_FAILED, pop_descriptor.clone());
+                let failed_child_owned = Owned::new(failed_child);
+                pop_descriptor.child.compare_and_set(Shared::null(), failed_child_owned, SeqCst, guard);
+
+                break
+            }
+
+            failures += 1;
+
+            let expected = previous_spot.load(SeqCst, guard);
+            if expected.tag() == TagNotValue {
+                let failed_child = PopSubDescr::with_state_and_parent(STATE_FAILED, pop_descriptor.clone());
+                let failed_child_owned = Owned::new(failed_child);
+                pop_descriptor.child.compare_and_set(Shared::null(), failed_child_owned, SeqCst, guard);
+            }
+
+            match unpack_descr(expected, guard) {
+                Some(descriptor) => {
+                    let descr = unsafe { descriptor.deref() };
+                    self.complete_base(previous_spot.clone(), expected, descr, guard);
+                },
+                None => {
+                    let raw_value = unsafe { expected.deref() }.clone();
+                    let raw_sub = PopSubDescr::new(pop_descriptor.clone(), raw_value);
+
+                    let pop_sub_desc = Rc::new(raw_sub);
+                    let base_descr = BaseDescr::PopSubDescrType(pop_sub_desc);
+                    let packed = pack_descr(base_descr, guard);
+
+                    let previous_spot_replacement = previous_spot.compare_and_set(expected, packed, SeqCst, guard);
+
+                    if previous_spot_replacement.is_ok() {
+                        let child_replacement = pop_descriptor.child.compare_and_set(Shared::null(), Owned::new(PopSubDescr::new(pop_descriptor.clone(), raw_value)), SeqCst, guard);
+                        if child_replacement.is_ok() {
+                            previous_spot.compare_and_set(packed, Shared::null().with_tag(TagNotValue), SeqCst, guard);
+                        }
+                        else {
+                            let packed_2 = pack_descr(BaseDescr::PopDescrType(pop_descriptor.clone()), guard);
+                            previous_spot.compare_and_set(packed_2, expected, SeqCst, guard);
+                        }
+                    }
+                },
+            }
+        }
+
+        let packed_pop_descriptor = pack_descr(BaseDescr::PopDescrType(pop_descriptor.clone()), guard);
+
+        spot.compare_and_set(packed_pop_descriptor, Shared::null().with_tag(TagNotValue), SeqCst, guard);
+
+        let child_state = unsafe { pop_descriptor.child.load(SeqCst, guard).deref() }.state;
+
+        return child_state != STATE_FAILED;
+    }
+
+
+    pub fn complete_pop_sub(&self, spot: Spot, old: Shared<usize>, descr: Rc<PopSubDescr>, guard: &Guard) -> bool {
+        let f = descr.as_ref();
+        let owned_descr = Owned::new(f.clone()).into_shared(guard);
+        let cas_result = descr.parent.child
+            .compare_and_set(Shared::null(), owned_descr, SeqCst, guard);
+
+        if let Err(e) = cas_result {
+            // println!("The inserting the pop sub desc failed {:?}", e);
+        }
+
+        let result = if descr.parent.child.load(SeqCst, guard) == owned_descr {
+            spot.compare_and_set(old, Owned::new(0).with_tag(TagNotValue), SeqCst, guard)
+        } else {
+            spot.compare_and_set(old, Owned::new(descr.value), SeqCst, guard)
+        };
+
+        if let Err(e) = result {
+            // println!("Something went wrong {:?}", e)
+        }
+
+        descr.parent.child.load(SeqCst, guard) == owned_descr
+    }
 }
 
 struct Contiguous {
     // vector: Atomic<WaitFreeVector>,
     old: Atomic<Contiguous>,
     capacity: usize,
+
     // array is a regular array of atomic pointers
     array: Atomic<Vec<Spot>>,
 }
@@ -579,9 +727,6 @@ impl Contiguous {
         }
     }
 
-
-
-
     pub fn copy_value(&self, position: usize, guard: &Guard) {
         // Load the old Contiguous structure to copy from
         let oldptr = self.old.load(SeqCst, guard);
@@ -600,14 +745,14 @@ impl Contiguous {
             // Copying over the value from the old vector into our current vector
             let our_vector = unsafe { self.array.load(SeqCst, guard).deref() };
             let current_spot = our_vector[position].clone();
-            
-            let expected_value = Shared::<usize>::null().with_tag(TagNotCopied); 
+
+            let expected_value = Shared::<usize>::null().with_tag(TagNotCopied);
 
             let reloaded_old_value = load_vec[position].load(SeqCst, guard);
             let updated_our_vector = current_spot.compare_and_set(expected_value, reloaded_old_value, SeqCst, guard);
-            if updated_our_vector.is_err() {
-                println!("Couldn't overwrite the spot in our vector");
-            }
+            // if updated_our_vector.is_err() {
+            //     println!("Couldn't overwrite the spot in our vector");
+            // }
         }
     }
 
@@ -623,19 +768,48 @@ impl Contiguous {
     }
 }
 
-
-
 // PopDescr consists solely of a reference to a PopSubDescr (child) which is initially Null.
 #[derive(Clone)]
 pub struct PopDescr {
-    vec: Atomic<WaitFreeVector>,
     pos: usize,
-    child: Atomic<PopSubDescr>
+    child: Atomic<PopSubDescr>,
+}
+
+impl PopDescr {
+    // vec: Atomic<WaitFreeVector>,
+    pub fn new(pos: usize) -> PopDescr {
+        PopDescr {
+            // vec,
+            pos,
+            child: Atomic::null(),
+        }
+    }
 }
 
 // PopSubDescr consists of a reference to a previously placed PopDescr (parent)
 // and the value that was replaced by the PopSubDescr (value).
-struct PopSubDescr {
+#[derive(Clone)]
+// #[derive(Debug)]
+pub struct PopSubDescr {
     parent: Rc<PopDescr>,
     value: usize,
+    state: u8
+}
+
+impl PopSubDescr {
+    pub fn new(parent: Rc<PopDescr>, value: usize) -> PopSubDescr {
+        PopSubDescr {
+            parent: parent,
+            value: value,
+            state: STATE_UNDECIDED
+        }
+    }
+
+    pub fn with_state_and_parent(state: u8, parent: Rc<PopDescr>) -> PopSubDescr {
+        PopSubDescr {
+            parent: parent,
+            value: 0,
+            state: state
+        }
+    }
 }
