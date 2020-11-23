@@ -4,6 +4,7 @@ use crossbeam_epoch::{self as epoch, Atomic, Guard, Shared, Owned};
 use std::sync::atomic::Ordering::{SeqCst, Release, Acquire};
 use std::sync::atomic::{AtomicUsize, AtomicBool};
 
+const TagNone: usize = 0;
 const TagNotValue: usize = 1;
 const TagNotCopied: usize = 2;
 const TagDescr: usize = 3;
@@ -68,7 +69,7 @@ pub fn pack_descr(descr: BaseDescr, guard: &Guard) -> Shared<usize> {
 pub fn unpack_descr<'g>(curr: Shared<usize>, guard: &'g Guard) -> Option<Shared<'g, BaseDescr>> {
     let unmasked: Shared<BaseDescr> = unsafe { std::mem::transmute(curr) };
 
-    if unmasked.tag() == TagDescr {
+    if unmasked.tag() & 0b11 == TagDescr {
         Some(unmasked)
     }
     else {
@@ -260,7 +261,7 @@ impl WaitFreeVector {
                 // println!("Resize {} ", new_capacity);
             },
             Err(_) => {
-                println!("Resize Failed");
+                // println!("Resize Failed");
             },
         }
 
@@ -312,7 +313,7 @@ impl WaitFreeVector {
                 continue;
             }
 
-            if expected.tag() != TagNotValue {
+            if expected.tag() & 0b11 != TagNotValue {
                 pos += 1;
                 continue;
             }
@@ -388,7 +389,7 @@ impl WaitFreeVector {
                 continue;
             }
 
-            if expected.tag() != TagNotValue {
+            if expected.tag() & 0b11 != TagNotValue {
                 pos += 1;
                 continue;
             }
@@ -435,7 +436,7 @@ impl WaitFreeVector {
             let slot = self.get_spot(pos, guard);
             let ptr = slot.load(SeqCst, guard);
 
-            if ptr.tag() == TagNotValue || ptr.is_null() {
+            if ptr.tag() & 0b11 == TagNotValue || ptr.is_null() {
                 return None;
             }
 
@@ -471,7 +472,7 @@ impl WaitFreeVector {
         for failures in 0..=LIMIT {
             let spot = self.get_spot(pos, guard);
             let expectedptr = spot.load(SeqCst, guard);
-            if expectedptr.tag() == TagNotValue 
+            if expectedptr.tag() & 0b11 == TagNotValue 
             // || expectedptr.tag() == TagNotCopied 
             {
                 if pos == 0 {
@@ -597,7 +598,7 @@ impl WaitFreeVector {
 
         // Descriptor moved out of the way, but we still have to finish this push
         if rawstate == STATE_UNDECIDED {
-            if current.tag() == TagNotValue {
+            if current.tag() & 0b11 == TagNotValue {
                 let set_to_failed = descr.state.compare_and_set(mystate, Owned::new(STATE_FAILED), SeqCst, guard);
                 if set_to_failed.is_err() {
                     dbg!("Could not update the descriptor state to FAILED");
@@ -643,7 +644,7 @@ impl WaitFreeVector {
     
             let spot = self.get_spot(pos, guard);
             let expectedptr = spot.load(SeqCst, guard);
-            if expectedptr.tag() == TagNotValue {
+            if expectedptr.tag() & 0b11 == TagNotValue {
                 
                 let descr = BaseDescr::PopDescrType(Rc::new(PopDescr::new(pos)));
                 let cdescr = descr.clone();
@@ -712,7 +713,7 @@ impl WaitFreeVector {
             failures += 1;
 
             let expected = previous_spot.load(SeqCst, guard);
-            if expected.tag() == TagNotValue {
+            if expected.tag() & 0b11 == TagNotValue {
                 let failed_child = PopSubDescr::with_state_and_parent(STATE_FAILED, pop_descriptor.clone());
                 let failed_child_owned = Owned::new(failed_child);
                 pop_descriptor.child.compare_and_set(Shared::null(), failed_child_owned, SeqCst, guard);
@@ -790,6 +791,17 @@ struct Contiguous {
     array: Atomic<Vec<Spot>>,
 }
 
+pub fn mark_resize_bit(spot: &Spot, guard: &Guard) {
+    loop {
+        let old = spot.load(SeqCst, guard);
+        let val = old.with_tag(TagResize | old.tag());
+        
+        if spot.compare_and_set(old, val, SeqCst, guard).is_ok() {
+            break;
+        }
+    }
+}
+
 impl Contiguous {
     // pub fn new(vector: Atomic<WaitFreeVector>, capacity: usize) -> Contiguous {
     pub fn new(capacity: usize) -> Contiguous {
@@ -818,18 +830,27 @@ impl Contiguous {
 
         if position < load_vec.len() {
             let val = load_vec[position].load(SeqCst, guard);
-            if val.tag() == TagNotCopied {
+            if val.tag() & 0b11 == TagNotCopied {
                 old.copy_value(position, guard);
             }
+
+            let tag = val.tag();
 
             // Copying over the value from the old vector into our current vector
             let our_vector = unsafe { self.array.load(SeqCst, guard).deref() };
             let current_spot = our_vector[position].clone();
+
+            mark_resize_bit(&load_vec[position], guard);
             
             let expected_value = Shared::<usize>::null().with_tag(TagNotCopied); 
 
-            let reloaded_old_value = load_vec[position].load(SeqCst, guard);
-            let updated_our_vector = current_spot.compare_and_set(expected_value, reloaded_old_value, SeqCst, guard);
+            let reloaded_old_value = load_vec[position].load(SeqCst, guard);//.clone();
+            
+            // if tag != 0 {
+            //     println!("test");
+            // }
+            let n = reloaded_old_value.with_tag(tag & !TagResize);
+            let updated_our_vector = current_spot.compare_and_set(expected_value, n, SeqCst, guard);
             // if updated_our_vector.is_err() {
             //     println!("Couldn't overwrite the spot in our vector");
             // }
@@ -840,7 +861,7 @@ impl Contiguous {
         let vec = unsafe {self.array.load(SeqCst,guard).deref()};
         let spot = vec[position].load(SeqCst, guard);
 
-        if spot.tag() == TagNotCopied {
+        if spot.tag() & 0b11 == TagNotCopied {
             self.copy_value(position, guard);
         }
 
