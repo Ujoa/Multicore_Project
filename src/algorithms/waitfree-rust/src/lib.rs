@@ -424,6 +424,52 @@ impl WaitFreeVector {
         true
     }
 
+    pub fn cwrite(&self, tid: usize, pos: usize, expected: usize, new: usize) -> Option<usize> {
+        self.help_if_needed(tid);
+        let guard = &epoch::pin();
+
+        let shsize = self.size.load(SeqCst, guard);
+        let sizeusizeptr = unsafe { shsize.deref() }.clone();
+        let size = sizeusizeptr.load(SeqCst);
+
+        if pos >= size {
+            return None;
+        }
+
+        for failures in 0..=LIMIT {
+            let spot: Spot = self.get_spot(pos, guard);
+            let oldptr = spot.load(SeqCst, guard);
+            match unpack_descr(oldptr, guard) {
+                Some(x) => {
+                    let descval = unsafe { x.deref() }.clone();
+                    self.complete_base(spot, oldptr, &descval, guard);
+                },
+                None => {
+                    if oldptr.is_null() {
+                        return None;
+                    }
+
+                    let realval = unsafe { oldptr.deref() }.clone();
+                    if realval == expected {
+                        let res = spot.compare_and_set(oldptr, Owned::new(new), SeqCst, guard);
+                        match res {
+                            Ok(_) => {
+                                return Some(realval);
+                            },
+                            Err(_) => {
+                                return None;
+                            },
+                        }
+                    }
+                }
+            }
+        }
+
+        // Todo announcement table
+
+        None
+    }
+
     pub fn at(&self, tid: usize, pos: usize) -> Option<usize> {
         let guard = &epoch::pin();
 
