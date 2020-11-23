@@ -99,7 +99,7 @@ pub fn value_base(descr: BaseDescr) -> Option<usize> {
 pub enum BaseOp {
     PushOpType(PushOp),
     PopOpType(Arc<PopOp>),
-    WriteOpType(WriteOp),
+    WriteOpType(Arc<WriteOp>),
 }
 
 #[derive(Clone)]
@@ -524,12 +524,11 @@ impl WaitFreeVector {
             }
         }
 
-        let op = Owned::new(BaseOp::WriteOpType(WriteOp::new(pos, old, new)));
+        let op = Arc::new(WriteOp::new(pos, old, new));
+        let base_op = BaseOp::WriteOpType(op.clone());
+        self.announce_op(tid, Owned::new(base_op).into_shared(guard), guard);
 
-        self.announce_op(tid, op.into_shared(guard), guard);
-
-        // REPLACE THIS WITH FINAL ANNOUCEMENT TABLE STUFF
-        None
+        unsafe { op.result.load(SeqCst, guard).deref() }.clone()
     }
 
     pub fn at(&self, tid: usize, pos: usize) -> Option<usize> {
