@@ -186,7 +186,7 @@ impl WaitFreeVector {
 
         self.help(tid, help);
     }
-    
+
     pub fn help(&self, mytid: usize, help: usize) {
         let guard = &epoch::pin();
 
@@ -279,7 +279,7 @@ impl WaitFreeVector {
     }
 
     pub fn an_complete_base(&self, tid: usize, opptr: Shared<BaseOp>, guard: &Guard) -> bool {
-        let op: &BaseOp = unsafe { opptr.deref() };        
+        let op: &BaseOp = unsafe { opptr.deref() };
         match op {
             BaseOp::PushOpType(o) => self.an_complete_push(tid, o, opptr, guard),
             BaseOp::PopOpType(o) => self.an_complete_pop(tid, o, opptr, guard),
@@ -324,7 +324,7 @@ impl WaitFreeVector {
 
             if let Ok(_) = spot.compare_and_set(expected, descrptr, SeqCst, guard) {
                 let completeres = self.complete_base(spot, descrptr, &descr, guard);
-                
+
                 if completeres {
                     let resptr = op.result.load(SeqCst, guard);
                     let res = unsafe { resptr.deref() };
@@ -455,7 +455,7 @@ impl WaitFreeVector {
 
     pub fn push_back(&self, tid: usize, value: usize) {
         self.help_if_needed(tid);
-        
+
         let guard = &epoch::pin();
 
         let shvalue = Owned::new(value).into_shared(guard);
@@ -471,8 +471,8 @@ impl WaitFreeVector {
         for failures in 0..=LIMIT {
             let spot = self.get_spot(pos, guard);
             let expectedptr = spot.load(SeqCst, guard);
-            if expectedptr.tag() == TagNotValue 
-            // || expectedptr.tag() == TagNotCopied 
+            if expectedptr.tag() == TagNotValue
+            // || expectedptr.tag() == TagNotCopied
             {
                 if pos == 0 {
                     let res = spot.compare_and_set(expectedptr, shvalue, SeqCst, guard);
@@ -825,8 +825,8 @@ impl Contiguous {
             // Copying over the value from the old vector into our current vector
             let our_vector = unsafe { self.array.load(SeqCst, guard).deref() };
             let current_spot = our_vector[position].clone();
-            
-            let expected_value = Shared::<usize>::null().with_tag(TagNotCopied); 
+
+            let expected_value = Shared::<usize>::null().with_tag(TagNotCopied);
 
             let reloaded_old_value = load_vec[position].load(SeqCst, guard);
             let updated_our_vector = current_spot.compare_and_set(expected_value, reloaded_old_value, SeqCst, guard);
