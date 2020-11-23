@@ -142,12 +142,14 @@ pub struct WriteOp {
     done: Atomic<bool>,
     old: usize,
     new: usize,
+    result: Atomic<Option<usize>>,
 }
 
 impl WriteOp {
     pub fn new(pos: usize, old: usize, new: usize) -> WriteOp {
         WriteOp {
             done: Atomic::new(false),
+            result: Atomic::null(),
             pos,
             old,
             new,
@@ -307,6 +309,40 @@ impl WaitFreeVector {
             BaseOp::PopOpType(o) => self.an_complete_pop(tid, o, opptr, guard),
             BaseOp::WriteOpType(o) => self.an_complete_cwrite(tid, o, opptr, guard),
         }
+    }
+
+    pub fn an_complete_cwrite(&self, tid: usize, op: &WriteOp, opptr: Shared<BaseOp>, guard: &Guard) -> bool {
+        while op.result.load(SeqCst, guard).is_null() {
+            let spot = self.get_spot(op.pos, guard);
+            let expected = spot.load(SeqCst, guard);
+
+            if let Some(x) = unpack_descr(expected, guard) {
+                let base = unsafe { x.deref() };
+                self.complete_base(spot, expected, base, guard);
+                continue;
+            }
+
+            if expected.tag() != TagNotValue || expected.is_null() {
+                return false;
+            }
+
+            let rawval = unsafe { expected.deref() }.clone();
+
+            if rawval != op.old {
+                let res = Owned::new(None);
+                op.result.compare_and_set(Shared::null(), res, SeqCst, guard);
+
+                return true;
+            }
+            else {
+                let newptr = Owned::new(op.new);
+                spot.compare_and_set(expected, newptr, SeqCst, guard);
+
+                return true;
+            }
+        }
+
+        true
     }
 
     // the an_ prefix means this method is to complete an op on the announcement table, not in a descriptor
