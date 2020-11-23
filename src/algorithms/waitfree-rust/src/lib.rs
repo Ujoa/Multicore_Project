@@ -361,7 +361,7 @@ impl WaitFreeVector {
             let slot = self.get_spot(pos, guard);
             let ptr = slot.load(SeqCst, guard);
 
-            if ptr.tag() == TagNotValue {
+            if ptr.tag() == TagNotValue || ptr.is_null() {
                 return None;
             }
 
