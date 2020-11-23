@@ -32,7 +32,7 @@ const STATE_PASSED: u8 = 0x02;
 
 #[derive(Clone)]
 pub enum BaseDescr {
-    PushDescrType(Rc<PushDescr>),
+    PushDescrType(PushDescr),
     PopDescrType(Rc<PopDescr>),
     PopSubDescrType(Rc<PopSubDescr>),
 }
@@ -215,7 +215,7 @@ impl WaitFreeVector {
     }
 
     pub fn resize(&self){
-        println!("Resizing");
+        // println!("Resizing");
         let guard = &epoch::pin();
         let old = self.storage.load(SeqCst, guard);
 
@@ -271,7 +271,7 @@ impl WaitFreeVector {
     pub fn complete_base(&self, spot: Spot, old: Shared<usize>, descr: &BaseDescr, guard: &Guard) -> bool {
         // let cdescr = descr.clone();
         match descr {
-            BaseDescr::PushDescrType(d) => self.complete_push(spot, old, d.clone(), guard),
+            BaseDescr::PushDescrType(d) => self.complete_push(spot, old, d, guard),
             BaseDescr::PopDescrType(d) => self.complete_pop(spot, old, d.clone(), guard),
             BaseDescr::PopSubDescrType(d) => self.complete_pop_sub(spot, old, d.clone(), guard),
             _ => false,
@@ -319,7 +319,7 @@ impl WaitFreeVector {
 
             let pdescr = PushDescr::new(pos, op.value);
             pdescr.owner.store(opptr, SeqCst);
-            let descr = BaseDescr::PushDescrType(Rc::new(pdescr));
+            let descr = BaseDescr::PushDescrType(pdescr);
             let descrptr = pack_descr(descr.clone(), guard);
 
             if let Ok(_) = spot.compare_and_set(expected, descrptr, SeqCst, guard) {
@@ -435,7 +435,7 @@ impl WaitFreeVector {
             let slot = self.get_spot(pos, guard);
             let ptr = slot.load(SeqCst, guard);
 
-            if ptr.tag() == TagNotValue {
+            if ptr.tag() == TagNotValue || ptr.is_null() {
                 return None;
             }
 
@@ -489,7 +489,7 @@ impl WaitFreeVector {
                     }
                 }
 
-                let descr = BaseDescr::PushDescrType(Rc::new(PushDescr::new(pos, value)));
+                let descr = BaseDescr::PushDescrType(PushDescr::new(pos, value));
                 let cdescr = descr.clone();
                 let descrptr = pack_descr(descr, guard);
 
@@ -542,7 +542,7 @@ impl WaitFreeVector {
         self.help(tid, tid);
     }
 
-    pub fn complete_push(&self, spot: Spot, old: Shared<usize>, descr: Rc<PushDescr>, guard: &Guard) -> bool {
+    pub fn complete_push(&self, spot: Spot, old: Shared<usize>, descr: &PushDescr, guard: &Guard) -> bool {
 
         let newdescr = descr.clone();
 
@@ -764,7 +764,7 @@ impl WaitFreeVector {
             .compare_and_set(Shared::null(), owned_descr, SeqCst, guard);
     
         if let Err(e) = cas_result {
-            println!("The inserting the pop sub desc failed {:?}", e);
+            // println!("The inserting the pop sub desc failed {:?}", e);
         }
     
         let result = if descr.parent.child.load(SeqCst, guard) == owned_descr {
@@ -774,7 +774,7 @@ impl WaitFreeVector {
         };
     
         if let Err(e) = result {
-            println!("Something went wrong {:?}", e)
+            // println!("Something went wrong {:?}", e)
         }
     
         descr.parent.child.load(SeqCst, guard) == owned_descr
@@ -830,9 +830,9 @@ impl Contiguous {
 
             let reloaded_old_value = load_vec[position].load(SeqCst, guard);
             let updated_our_vector = current_spot.compare_and_set(expected_value, reloaded_old_value, SeqCst, guard);
-            if updated_our_vector.is_err() {
-                println!("Couldn't overwrite the spot in our vector");
-            }
+            // if updated_our_vector.is_err() {
+            //     println!("Couldn't overwrite the spot in our vector");
+            // }
         }
     }
 
