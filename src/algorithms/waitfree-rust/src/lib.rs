@@ -99,6 +99,7 @@ pub fn value_base(descr: BaseDescr) -> Option<usize> {
 pub enum BaseOp {
     PushOpType(PushOp),
     PopOpType(Arc<PopOp>),
+    WriteOpType(WriteOp),
 }
 
 #[derive(Clone)]
@@ -134,6 +135,28 @@ impl PopOp {
         }
     }
 }
+
+#[derive(Clone)]
+pub struct WriteOp {
+    pos: usize,
+    // done: Atomic<AtomicBool>,
+    old: usize,
+    new: usize,
+    result: Arc<Atomic<Option<bool>>>,
+}
+
+impl WriteOp {
+    pub fn new(pos: usize, old: usize, new: usize) -> WriteOp {
+        WriteOp {
+            // done: Atomic::new(AtomicBool::new(false)),
+            result: Arc::new(Atomic::new(None)),
+            pos,
+            old,
+            new,
+        }
+    }
+}
+
 
 pub struct WaitFreeVector {
     storage: Atomic<Contiguous>,
@@ -278,12 +301,62 @@ impl WaitFreeVector {
         }
     }
 
+    // the an_ prefix means this method is to complete an op on the announcement table, not in a descriptor
     pub fn an_complete_base(&self, tid: usize, opptr: Shared<BaseOp>, guard: &Guard) -> bool {
         let op: &BaseOp = unsafe { opptr.deref() };
         match op {
             BaseOp::PushOpType(o) => self.an_complete_push(tid, o, opptr, guard),
             BaseOp::PopOpType(o) => self.an_complete_pop(tid, o, opptr, guard),
+            BaseOp::WriteOpType(o) => self.an_complete_cwrite(tid, o, opptr, guard),
         }
+    }
+
+    pub fn an_complete_cwrite(&self, tid: usize, op: &WriteOp, opptr: Shared<BaseOp>, guard: &Guard) -> bool {
+        let arcres = op.result.clone();
+        loop {   
+            let resptr = arcres.load(SeqCst, guard);
+            if resptr.is_null() {
+                return false;
+            }
+
+            let res = unsafe { resptr.deref() }.clone();
+            if let Some(_) = res {
+                return true;
+            }
+
+            let spot = self.get_spot(op.pos, guard);
+            let expected = spot.load(SeqCst, guard);
+
+            if let Some(x) = unpack_descr(expected, guard) {
+                let base = unsafe { x.deref() };
+                self.complete_base(spot, expected, base, guard);
+                continue;
+            }
+
+            if expected.tag() != TagNotValue || expected.is_null() {
+                return false;
+            }
+
+            let rawval = unsafe { expected.deref() }.clone();
+
+            if rawval != op.old {
+                let new = Owned::new(Some(false));
+                arcres.compare_and_set(resptr, new, SeqCst, guard);
+
+                return true;
+            }
+            else {
+                let newptr = Owned::new(op.new);
+                if let Ok(_) = spot.compare_and_set(expected, newptr, SeqCst, guard) {
+                    let newres = Owned::new(Some(true));
+                    arcres.compare_and_set(resptr, newres, SeqCst, guard);
+                }
+
+                return true;
+            }
+        }
+
+        true
     }
 
     // the an_ prefix means this method is to complete an op on the announcement table, not in a descriptor
@@ -422,6 +495,61 @@ impl WaitFreeVector {
         assert!(!op.result.load(SeqCst, guard).is_null());
 
         true
+    }
+
+    pub fn cwrite(&self, tid: usize, pos: usize, old: usize, new: usize) -> bool {
+        self.help_if_needed(tid);
+        let guard = &epoch::pin();
+
+        let shsize = self.size.load(SeqCst, guard);
+        let sizeusizeptr = unsafe { shsize.deref() }.clone();
+        let size = sizeusizeptr.load(SeqCst);
+
+        if pos >= size {
+            return false;
+        }
+
+        for failures in 0..=LIMIT {
+            let spot: Spot = self.get_spot(pos, guard);
+            let oldptr = spot.load(SeqCst, guard);
+            match unpack_descr(oldptr, guard) {
+                Some(x) => {
+                    let descval = unsafe { x.deref() }.clone();
+                    self.complete_base(spot, oldptr, &descval, guard);
+                },
+                None => {
+                    if oldptr.tag() == TagNotValue || oldptr.is_null() {
+                        return false;
+                    }
+
+                    let realval = unsafe { oldptr.deref() }.clone();
+                    if realval == old {
+                        let res = spot.compare_and_set(oldptr, Owned::new(new), SeqCst, guard);
+                        match res {
+                            Ok(_) => {
+                                return true;
+                            },
+                            Err(_) => {
+                                return false;
+                            },
+                        }
+                    }
+                }
+            }
+        }
+
+        let op = WriteOp::new(pos, old, new);
+        let base_op = BaseOp::WriteOpType(op.clone());
+        self.announce_op(tid, Owned::new(base_op).into_shared(guard), guard);
+
+        let res = op.result.clone();
+
+        let rawresult = unsafe { res.load(SeqCst, guard).deref() }.clone();
+
+        match rawresult {
+            Some(x) => x,
+            None => false,
+        }
     }
 
     pub fn at(&self, tid: usize, pos: usize) -> Option<usize> {
