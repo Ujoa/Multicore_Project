@@ -444,19 +444,22 @@ impl WaitFreeVector {
     }
 
     pub fn an_complete_pop(&self, tid: usize, op: &PopOp, op_ptr: Shared<BaseOp>, guard: &Guard) -> bool {
+        println!("In announcement complete pop");
         while op.result.load(SeqCst, guard).is_null() {
             let mut pos = self.get_pos(guard);
 
             if pos == 0 {
                 op.result.store(Owned::new(None), SeqCst);
+                println!("Continuing");
                 continue;
             }
 
             let spot = self.get_spot(pos, guard);
             let expected = spot.load(SeqCst, guard);
-
+            println!("In Something");
             if let Some(base_descr) = unpack_descr(expected, guard) {
                 let descr = unsafe { base_descr.deref() };
+                println!("Re running complete base");
                 self.complete_base(spot, expected, descr, guard);
                 continue;
             }
@@ -755,6 +758,7 @@ impl WaitFreeVector {
 
     pub fn pop_back(&self, tid: usize) -> Option<usize> {
         self.help_if_needed(tid);
+        println!("In pop back");
 
         let guard = &epoch::pin();
         
@@ -765,9 +769,12 @@ impl WaitFreeVector {
         let mut pos = sizeusizeptr.load(SeqCst);
     
         for failures in 0..=LIMIT {
+            println!("Starting");
             if pos == 0 {
+                println!("Returned None...");
                 return None;
             }
+            println!("Didn't return none...");
     
             let spot = self.get_spot(pos, guard);
             let expectedptr = spot.load(SeqCst, guard);
@@ -808,15 +815,19 @@ impl WaitFreeVector {
                     }
                 }
             }
-            
+            println!("In loop {}", pos);
             // announcement table stuff
         }
 
+        println!("Outside of loop");
         let pop_op = Arc::new(PopOp::new());
         let base_op = BaseOp::PopOpType(pop_op.clone());
         self.announce_op(tid, Owned::new(base_op).into_shared(guard), guard);
+        println!("Announced op");
 
-        unsafe { pop_op.result.load(SeqCst, guard).deref() }.clone()
+        let value = unsafe { pop_op.result.load(SeqCst, guard).deref() }.clone();
+        println!("Deref'd value");
+        value
     }
 
     pub fn complete_pop(&self, spot: Spot, old: Shared<usize>, pop_descriptor: Rc<PopDescr>, guard: &Guard) -> bool {
@@ -832,7 +843,7 @@ impl WaitFreeVector {
             if failures >= LIMIT {
                 let failed_child = PopSubDescr::with_state_and_parent(STATE_FAILED, pop_descriptor.clone());
                 let failed_child_owned = Owned::new(failed_child);
-                pop_descriptor.child.compare_and_set(Shared::null(), failed_child_owned, SeqCst, guard);
+                pop_descriptor.child.compare_and_set(Shared::null(), failed_child_owned.into_shared(guard), SeqCst, guard);
 
                 break
             }
@@ -840,44 +851,50 @@ impl WaitFreeVector {
             failures += 1;
 
             let expected = previous_spot.load(SeqCst, guard);
+            if expected.is_null() {
+                println!("tag {}", expected.tag());
+            }
             if expected.tag() == TagNotValue {
                 let failed_child = PopSubDescr::with_state_and_parent(STATE_FAILED, pop_descriptor.clone());
                 let failed_child_owned = Owned::new(failed_child);
-                pop_descriptor.child.compare_and_set(Shared::null(), failed_child_owned, SeqCst, guard);
+                pop_descriptor.child.compare_and_set(Shared::null(), failed_child_owned.into_shared(guard), SeqCst, guard);
             }
-            
-            match unpack_descr(expected, guard) {
-                Some(descriptor) => {
-                    let descr = unsafe { descriptor.deref() };
-                    self.complete_base(previous_spot.clone(), expected, descr, guard);
-                },
-                None => {
-                    let raw_value = unsafe { expected.deref() }.clone();
-                    let raw_sub = PopSubDescr::new(pop_descriptor.clone(), raw_value);
-                    
-                    let pop_sub_desc = Rc::new(raw_sub);
-                    let base_descr = BaseDescr::PopSubDescrType(pop_sub_desc);
-                    let packed = pack_descr(base_descr, guard);
-
-                    let previous_spot_replacement = previous_spot.compare_and_set(expected, packed, SeqCst, guard);
-
-                    if previous_spot_replacement.is_ok() {
-                        let child_replacement = pop_descriptor.child.compare_and_set(Shared::null(), Owned::new(PopSubDescr::new(pop_descriptor.clone(), raw_value)), SeqCst, guard);
-                        if child_replacement.is_ok() {
-                            previous_spot.compare_and_set(packed, Shared::null().with_tag(TagNotValue), SeqCst, guard);
+            else {
+                match unpack_descr(expected, guard) {
+                    Some(descriptor) => {
+                        let descr = unsafe { descriptor.deref() };
+                        self.complete_base(previous_spot.clone(), expected, descr, guard);
+                    },
+                    None => {
+                        let raw_value = unsafe { expected.deref() }.clone();
+                        let raw_sub = PopSubDescr::new(pop_descriptor.clone(), raw_value);
+                        
+                        let pop_sub_desc = Rc::new(raw_sub);
+                        let base_descr = BaseDescr::PopSubDescrType(pop_sub_desc);
+                        let packed = pack_descr(base_descr, guard);
+    
+                        let previous_spot_replacement = previous_spot.compare_and_set(expected, packed, SeqCst, guard);
+    
+                        if previous_spot_replacement.is_ok() {
+                            let child_replacement = pop_descriptor.child.compare_and_set(Shared::null(), Owned::new(PopSubDescr::new(pop_descriptor.clone(), raw_value)), SeqCst, guard);
+                            if child_replacement.is_ok() {
+                                previous_spot.compare_and_set(packed, Shared::null().with_tag(TagNotValue), SeqCst, guard);
+                            }
+                            else {
+                                let packed_2 = pack_descr(BaseDescr::PopDescrType(pop_descriptor.clone()), guard);
+                                previous_spot.compare_and_set(packed_2, expected, SeqCst, guard);
+                            }
                         }
-                        else {
-                            let packed_2 = pack_descr(BaseDescr::PopDescrType(pop_descriptor.clone()), guard);
-                            previous_spot.compare_and_set(packed_2, expected, SeqCst, guard);
-                        }
-                    }
-                },
+                    },
+                }
             }
         }
 
-        let packed_pop_descriptor = pack_descr(BaseDescr::PopDescrType(pop_descriptor.clone()), guard);
+        // let packed_pop_descriptor = pack_descr(BaseDescr::PopDescrType(pop_descriptor.clone()), guard);
 
-        spot.compare_and_set(packed_pop_descriptor, Shared::null().with_tag(TagNotValue), SeqCst, guard);
+        // println!("Packed tag: {} spot tag: {}", packed_pop_descriptor.tag(), spot.load(SeqCst, guard).tag());
+        // println!("Packed: {:?} spot {:?} old {:?}", packed_pop_descriptor, spot.load(SeqCst, guard), old);
+        let result = spot.compare_and_set(old, Shared::null().with_tag(TagNotValue), SeqCst, guard);
 
         let child_state = unsafe { pop_descriptor.child.load(SeqCst, guard).deref() }.state;
 
