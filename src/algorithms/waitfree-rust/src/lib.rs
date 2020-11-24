@@ -99,7 +99,7 @@ pub fn value_base(descr: BaseDescr) -> Option<usize> {
 pub enum BaseOp {
     PushOpType(PushOp),
     PopOpType(Arc<PopOp>),
-    WriteOpType(Arc<WriteOp>),
+    WriteOpType(WriteOp),
 }
 
 #[derive(Clone)]
@@ -139,17 +139,17 @@ impl PopOp {
 #[derive(Clone)]
 pub struct WriteOp {
     pos: usize,
-    done: Atomic<bool>,
+    // done: Atomic<AtomicBool>,
     old: usize,
     new: usize,
-    result: Atomic<Option<usize>>,
+    result: Arc<Atomic<Option<bool>>>,
 }
 
 impl WriteOp {
     pub fn new(pos: usize, old: usize, new: usize) -> WriteOp {
         WriteOp {
-            done: Atomic::new(false),
-            result: Atomic::null(),
+            // done: Atomic::new(AtomicBool::new(false)),
+            result: Arc::new(Atomic::new(None)),
             pos,
             old,
             new,
@@ -312,7 +312,18 @@ impl WaitFreeVector {
     }
 
     pub fn an_complete_cwrite(&self, tid: usize, op: &WriteOp, opptr: Shared<BaseOp>, guard: &Guard) -> bool {
-        while op.result.load(SeqCst, guard).is_null() {
+        let arcres = op.result.clone();
+        loop {   
+            let resptr = arcres.load(SeqCst, guard);
+            if resptr.is_null() {
+                return false;
+            }
+
+            let res = unsafe { resptr.deref() }.clone();
+            if let Some(_) = res {
+                return true;
+            }
+
             let spot = self.get_spot(op.pos, guard);
             let expected = spot.load(SeqCst, guard);
 
@@ -329,14 +340,17 @@ impl WaitFreeVector {
             let rawval = unsafe { expected.deref() }.clone();
 
             if rawval != op.old {
-                let res = Owned::new(None);
-                op.result.compare_and_set(Shared::null(), res, SeqCst, guard);
+                let new = Owned::new(Some(false));
+                arcres.compare_and_set(resptr, new, SeqCst, guard);
 
                 return true;
             }
             else {
                 let newptr = Owned::new(op.new);
-                spot.compare_and_set(expected, newptr, SeqCst, guard);
+                if let Ok(_) = spot.compare_and_set(expected, newptr, SeqCst, guard) {
+                    let newres = Owned::new(Some(true));
+                    arcres.compare_and_set(resptr, newres, SeqCst, guard);
+                }
 
                 return true;
             }
@@ -483,7 +497,7 @@ impl WaitFreeVector {
         true
     }
 
-    pub fn cwrite(&self, tid: usize, pos: usize, old: usize, new: usize) -> Option<usize> {
+    pub fn cwrite(&self, tid: usize, pos: usize, old: usize, new: usize) -> bool {
         self.help_if_needed(tid);
         let guard = &epoch::pin();
 
@@ -492,7 +506,7 @@ impl WaitFreeVector {
         let size = sizeusizeptr.load(SeqCst);
 
         if pos >= size {
-            return None;
+            return false;
         }
 
         for failures in 0..=LIMIT {
@@ -504,8 +518,8 @@ impl WaitFreeVector {
                     self.complete_base(spot, oldptr, &descval, guard);
                 },
                 None => {
-                    if oldptr.is_null() {
-                        return None;
+                    if oldptr.tag() == TagNotValue || oldptr.is_null() {
+                        return false;
                     }
 
                     let realval = unsafe { oldptr.deref() }.clone();
@@ -513,10 +527,10 @@ impl WaitFreeVector {
                         let res = spot.compare_and_set(oldptr, Owned::new(new), SeqCst, guard);
                         match res {
                             Ok(_) => {
-                                return Some(realval);
+                                return true;
                             },
                             Err(_) => {
-                                return None;
+                                return false;
                             },
                         }
                     }
@@ -524,11 +538,18 @@ impl WaitFreeVector {
             }
         }
 
-        let op = Arc::new(WriteOp::new(pos, old, new));
+        let op = WriteOp::new(pos, old, new);
         let base_op = BaseOp::WriteOpType(op.clone());
         self.announce_op(tid, Owned::new(base_op).into_shared(guard), guard);
 
-        unsafe { op.result.load(SeqCst, guard).deref() }.clone()
+        let res = op.result.clone();
+
+        let rawresult = unsafe { res.load(SeqCst, guard).deref() }.clone();
+
+        match rawresult {
+            Some(x) => x,
+            None => false,
+        }
     }
 
     pub fn at(&self, tid: usize, pos: usize) -> Option<usize> {
